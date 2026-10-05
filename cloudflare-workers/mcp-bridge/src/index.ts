@@ -4,6 +4,7 @@ import {enforceRateLimit} from './rateLimit';
 import {sanitizeEgressPayload} from './sanitizer';
 import {handleBridgeStatus} from './tools/bridgeStatus';
 import {handleSanitizerCheck} from './tools/sanitizerCheck';
+import {handleSecurityCheck} from './tools/securityCheck';
 import type {Env, JsonRpcRequest} from './types';
 
 const MAX_REQUEST_BYTES = 64 * 1024;
@@ -13,22 +14,33 @@ const PROTOCOL_VERSION = '2024-11-05';
 const tools = [
   {
     name: 'bridge_runtime_status',
-    description: 'Reports bridge runtime and security configuration without querying a database.',
-    inputSchema: {type: 'object', properties: {}, additionalProperties: false}
+    description: 'Reports bridge runtime, transport, rate-limit, and kill-switch status without querying a database.',
+    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
+    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+  },
+  {
+    name: 'bridge_security_check',
+    description: 'Checks whether required access controls are configured; never returns credentials.',
+    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
+    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
   },
   {
     name: 'sanitizer_self_test',
-    description: 'Checks egress redaction against representative secrets and email addresses.',
-    inputSchema: {type: 'object', properties: {}, additionalProperties: false}
+    description: 'Tests egress redaction against representative credentials and personal data.',
+    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
+    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
   }
 ];
 
 function corsHeaders(request: Request, env: Env): Headers {
-  const allowed = (env.ALLOWED_ORIGINS ?? '').split(',').map((item) => item.trim());
+  const allowedOrigins = (env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
   const origin = request.headers.get('Origin');
   const headers = new Headers({Vary: 'Origin'});
 
-  if (origin && allowed.includes(origin)) {
+  if (origin && allowedOrigins.includes(origin)) {
     headers.set('Access-Control-Allow-Origin', origin);
     headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
     headers.set(
@@ -102,14 +114,29 @@ async function readPayload(request: Request): Promise<JsonRpcRequest | null> {
   }
 }
 
+function validId(id: JsonRpcRequest['id']): boolean {
+  return id === undefined || id === null || typeof id === 'string' || typeof id === 'number';
+}
+
+function emptyArguments(value: unknown): boolean {
+  return value === undefined ||
+    (typeof value === 'object' && value !== null && !Array.isArray(value) &&
+      Object.keys(value).length === 0);
+}
+
 async function callTool(name: string, env: Env): Promise<unknown> {
   if (name === 'bridge_runtime_status') return handleBridgeStatus(env);
+  if (name === 'bridge_security_check') return handleSecurityCheck(env);
   if (name === 'sanitizer_self_test') return handleSanitizerCheck();
   throw new Error('Unknown tool.');
 }
 
-function hasValidId(id: JsonRpcRequest['id']): boolean {
-  return id === undefined || id === null || typeof id === 'string' || typeof id === 'number';
+function jsonMimeAccepted(request: Request): boolean {
+  const accepted = (request.headers.get('Accept') ?? '*/*')
+    .split(',')
+    .map((value) => value.trim().split(';')[0].toLowerCase());
+
+  return accepted.includes('*/*') || accepted.includes('application/json');
 }
 
 export default {
@@ -121,19 +148,35 @@ export default {
     if (origin && !headers.has('Access-Control-Allow-Origin')) {
       return new Response('Origin not allowed.', {status: 403});
     }
-    if (request.method === 'OPTIONS') return new Response(null, {status: 204, headers});
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {status: 204, headers});
+    }
+
     if (path !== '/mcp') {
       return jsonResponse(rpcError(null, -32601, 'MCP endpoint not found.'), 404, request, env);
     }
+
     if (request.method !== 'POST') {
-      return jsonResponse(rpcError(null, -32600, 'MCP expects POST transport.'), 405, request, env);
+      return jsonResponse(
+        rpcError(null, -32600, 'MCP expects POST transport.'),
+        405,
+        request,
+        env,
+        {Allow: 'POST, OPTIONS'}
+      );
     }
-    if (!request.headers.get('Content-Type')?.toLowerCase().includes('application/json')) {
+
+    const contentType = (request.headers.get('Content-Type') ?? '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+
+    if (contentType !== 'application/json') {
       return jsonResponse(rpcError(null, -32600, 'Content-Type must be application/json.'), 415, request, env);
     }
 
-    const accept = request.headers.get('Accept') ?? '*/*';
-    if (!accept.includes('*/*') && !accept.includes('application/json')) {
+    if (!jsonMimeAccepted(request)) {
       return jsonResponse(rpcError(null, -32600, 'Accept must include application/json.'), 406, request, env);
     }
 
@@ -157,25 +200,35 @@ export default {
 
     const payload = await readPayload(request);
     if (!payload) {
-      return jsonResponse(rpcError(null, -32700, 'Invalid JSON or request body exceeds 64 KB.'), 400, request, env);
+      return jsonResponse(
+        rpcError(null, -32700, 'Invalid JSON or request body exceeds 64 KB.'),
+        400,
+        request,
+        env
+      );
     }
+
+    const hasId = Object.prototype.hasOwnProperty.call(payload, 'id');
     if (
       payload.jsonrpc !== '2.0' ||
       typeof payload.method !== 'string' ||
-      !hasValidId(payload.id)
+      !validId(payload.id) ||
+      (payload.params !== undefined &&
+        (typeof payload.params !== 'object' || payload.params === null || Array.isArray(payload.params)))
     ) {
       return jsonResponse(rpcError(payload.id, -32600, 'Invalid JSON-RPC request.'), 400, request, env);
     }
 
-    if (payload.method.startsWith('notifications/')) {
+    if (!hasId) {
       return new Response(null, {status: 202, headers});
     }
+
     if (payload.method === 'initialize') {
       return jsonResponse(
         rpcResult(payload.id, {
           protocolVersion: PROTOCOL_VERSION,
           capabilities: {tools: {listChanged: false}},
-          serverInfo: {name: 'axim-core-mcp-gateway', version: '1.2.0'}
+          serverInfo: {name: 'axim-core-mcp-gateway', version: '1.3.0'}
         }),
         200,
         request,
@@ -183,14 +236,38 @@ export default {
         {'MCP-Protocol-Version': PROTOCOL_VERSION}
       );
     }
+
     if (payload.method === 'ping') {
       return jsonResponse(rpcResult(payload.id, {}), 200, request, env);
     }
+
     if (payload.method === 'tools/list') {
       return jsonResponse(rpcResult(payload.id, {tools}), 200, request, env);
     }
+
     if (payload.method !== 'tools/call') {
       return jsonResponse(rpcError(payload.id, -32601, 'Method not implemented.'), 200, request, env);
+    }
+
+    const toolName = payload.params?.name;
+    const args = payload.params?.arguments;
+
+    if (typeof toolName !== 'string' || !emptyArguments(args)) {
+      return jsonResponse(
+        rpcError(payload.id, -32602, 'A tool name and empty object arguments are required.'),
+        200,
+        request,
+        env
+      );
+    }
+
+    if (!tools.some((tool) => tool.name === toolName)) {
+      return jsonResponse(
+        rpcResult(payload.id, toolResult({error: 'Unknown or unavailable tool.'}, true)),
+        200,
+        request,
+        env
+      );
     }
 
     const rate = await enforceRateLimit(env, auth.operatorEmail);
@@ -199,29 +276,27 @@ export default {
       const message = status === 429
         ? 'Hourly tool call limit reached.'
         : 'Production rate limiting is not configured.';
+      const retryAfter = Math.max(1, rate.resetAt - Math.floor(Date.now() / 1000));
+
       return jsonResponse(
         rpcError(payload.id, -32003, message),
         status,
         request,
         env,
-        {'Retry-After': String(Math.max(1, rate.resetAt - Math.floor(Date.now() / 1000)))}
+        {'Retry-After': String(retryAfter)}
       );
     }
 
-    const name = payload.params?.name;
-    const args = payload.params?.arguments ?? {};
-    if (!name || typeof args !== 'object' || Array.isArray(args)) {
-      return jsonResponse(rpcError(payload.id, -32602, 'A tool name and object arguments are required.'), 200, request, env);
-    }
-
     try {
-      const result = await callTool(name, env);
-      if (Object.keys(args).length > 0) {
-        return jsonResponse(rpcResult(payload.id, toolResult({error: 'This tool accepts no arguments.'}, true)), 200, request, env);
-      }
+      const result = await callTool(toolName, env);
       return jsonResponse(rpcResult(payload.id, toolResult(result)), 200, request, env);
     } catch {
-      return jsonResponse(rpcResult(payload.id, toolResult({error: 'Unknown or unavailable tool.'}, true)), 200, request, env);
+      return jsonResponse(
+        rpcResult(payload.id, toolResult({error: 'Tool execution failed.'}, true)),
+        200,
+        request,
+        env
+      );
     }
   }
 };

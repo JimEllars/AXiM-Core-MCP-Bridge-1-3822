@@ -1,9 +1,7 @@
 export interface Env {
   ENVIRONMENT?: string;
-  SUPABASE_URL?: string;
   PASSPORT_VERIFY_URL: string;
   ALLOWED_ORIGINS?: string;
-  SUPABASE_SERVICE_ROLE_KEY?: string;
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
   RATE_LIMIT_PER_HOUR?: string;
@@ -18,6 +16,7 @@ export interface JsonRpcRequest {
     name?: string;
     arguments?: Record<string, unknown>;
     protocolVersion?: string;
+    [key: string]: unknown;
   };
 }
 

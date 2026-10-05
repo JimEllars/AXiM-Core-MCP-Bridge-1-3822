@@ -5,22 +5,19 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 ENVIRONMENT = "production"
-SUPABASE_URL = "https://pvbcdndqjguzqeafhwhw.supabase.co"
 PASSPORT_VERIFY_URL = "https://passport.axim.us.com/api/v1/auth/verify-token"
 ALLOWED_ORIGINS = "https://axim.us.com,https://core.axim.us.com,http://localhost:5173"
 RATE_LIMIT_PER_HOUR = "60"
 
-# Configure these with Wrangler secrets; never commit secret values:
-# npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+# Configure these using Wrangler secrets; never commit credential values:
 # npx wrangler secret put CF_ACCESS_CLIENT_ID
 # npx wrangler secret put CF_ACCESS_CLIENT_SECRET
-#
-# Production requires a KV namespace binding for LAB_STATE.
-# Use an existing namespace; do not invent a namespace ID.
+
+# Production requires an existing KV namespace bound to LAB_STATE.
+# Add its real namespace ID here before deployment; do not use a placeholder.
 # [[kv_namespaces]]
 # binding = "LAB_STATE"
 # id = "YOUR_EXISTING_KV_NAMESPACE_ID"
 #
-# Store the emergency kill switch in that namespace:
-# key: OPERATOR_DOCK_SUSPENDED
-# value: true
+# Emergency kill switch key: OPERATOR_DOCK_SUSPENDED
+# Set its value to "true" in the bound namespace to suspend the bridge.

@@ -11,12 +11,16 @@ export async function handleBridgeStatus(env: Env) {
     transport: 'MCP Streamable HTTP, stateless JSON',
     operator_auth: 'Cloudflare Access and Passport session required',
     rate_limit: env.LAB_STATE
-      ? 'KV-backed; 60 tool calls per hour by default'
+      ? 'KV-backed best-effort limit; KV increments are not atomic'
       : 'Not configured',
     kill_switch: killSwitch.configured
-      ? killSwitch.suspended ? 'SUSPENDED' : degraded ? 'UNAVAILABLE' : 'ACTIVE'
+      ? killSwitch.suspended
+        ? 'SUSPENDED'
+        : degraded
+          ? 'UNAVAILABLE'
+          : 'ACTIVE'
       : 'NOT_CONFIGURED',
-    database_diagnostics: 'Unavailable until a backend is connected',
+    database_diagnostics: 'Not enabled; connect a backend before enabling database tools',
     timestamp: new Date().toISOString()
   };
 }
