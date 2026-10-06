@@ -8,11 +8,22 @@ export interface KillSwitchStatus {
 
 export async function readKillSwitch(env: Env): Promise<KillSwitchStatus> {
   if (!env.LAB_STATE) {
-    return {
-      suspended: false,
-      configured: false,
-      unavailable: env.ENVIRONMENT === 'production'
-    };
+    const isProduction = env.ENVIRONMENT === 'production';
+    const requireKv = isProduction && env.DISABLE_KV_REQUIREMENT !== 'true';
+
+    if (requireKv) {
+      return {
+        suspended: false,
+        configured: false,
+        unavailable: true
+      };
+    } else {
+      return {
+        suspended: false,
+        configured: false,
+        unavailable: false
+      };
+    }
   }
 
   try {
