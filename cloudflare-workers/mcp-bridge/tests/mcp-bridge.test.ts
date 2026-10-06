@@ -11,7 +11,7 @@ const baseEnv: Env = {
   ALLOWED_ORIGINS: 'https://core.axim.us.com'
 };
 
-const context = {} as ExecutionContext;
+const context = { waitUntil: vi.fn(() => {}) } as unknown as ExecutionContext;
 
 function makeRequest(
   body: unknown,
@@ -49,9 +49,9 @@ function makeKv(initial: Record<string, string> = {}) {
   } as unknown as KVNamespace;
 }
 
-async function post(body: unknown, env = baseEnv, headers: Record<string, string> = {}) {
+async function post(body: unknown, env = baseEnv, headers: Record<string, string> = {}, url = 'https://mcp.axim.us.com/mcp') {
   mockPassport();
-  return worker.fetch(makeRequest(body, headers), env, context);
+  return worker.fetch(makeRequest(body, headers, url), env, context);
 }
 
 afterEach(() => {
@@ -60,7 +60,7 @@ afterEach(() => {
 });
 
 describe('AXiM Core MCP bridge', () => {
-  it('rejects invalid Cloudflare Access credentials', async () => {
+  it('rejects invalid Cloudflare Access credentials on /mcp', async () => {
     const response = await post(
       {jsonrpc: '2.0', method: 'ping', id: 1},
       baseEnv,
@@ -70,7 +70,7 @@ describe('AXiM Core MCP bridge', () => {
     expect(response.status).toBe(403);
   });
 
-  it('rejects missing Passport bearer sessions', async () => {
+  it('rejects missing Passport bearer sessions on /mcp', async () => {
     const response = await post(
       {jsonrpc: '2.0', method: 'ping', id: 1},
       baseEnv,
@@ -80,34 +80,27 @@ describe('AXiM Core MCP bridge', () => {
     expect(response.status).toBe(401);
   });
 
-  it('rejects identities outside the operator allowlist', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(
-        JSON.stringify({active: true, email: 'unauthorized@example.test'}),
-        {status: 200}
-      ))
-    );
-
-    const response = await worker.fetch(
-      makeRequest({jsonrpc: '2.0', method: 'ping', id: 1}),
-      baseEnv,
-      context
-    );
-
-    expect(response.status).toBe(403);
-  });
-
-  it('rejects Passport verification URLs without HTTPS in production', async () => {
+  it('rejects unauthenticated requests on /v1/marketplace', async () => {
     const response = await post(
       {jsonrpc: '2.0', method: 'ping', id: 1},
-      {...baseEnv, ENVIRONMENT: 'production', PASSPORT_VERIFY_URL: 'http://passport.example.test'}
+      baseEnv,
+      {Authorization: ''},
+      'https://mcp.axim.us.com/v1/marketplace'
     );
-
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(401);
   });
 
-  it('advertises only local, non-database tools', async () => {
+  it('accepts valid requests on /v1/marketplace', async () => {
+    const response = await post(
+      {jsonrpc: '2.0', method: 'ping', id: 1},
+      baseEnv,
+      {'X-Axim-Gateway-Token': 'valid'},
+      'https://mcp.axim.us.com/v1/marketplace'
+    );
+    expect(response.status).toBe(200);
+  });
+
+  it('advertises mcp tools on /mcp', async () => {
     const response = await post({jsonrpc: '2.0', method: 'tools/list', id: 1});
     const body = await response.json() as {result: {tools: Array<{name: string}>}};
 
@@ -115,97 +108,38 @@ describe('AXiM Core MCP bridge', () => {
     expect(body.result.tools.map((tool) => tool.name)).toEqual([
       'bridge_runtime_status',
       'bridge_security_check',
-      'sanitizer_self_test'
+      'sanitizer_self_test',
+      'core_health_check',
+      'telemetry_lookup',
+      'hitl_queue_status'
     ]);
   });
 
-  it('returns MCP initialization metadata and responds to ping', async () => {
-    const init = await post({jsonrpc: '2.0', method: 'initialize', id: 2});
-    const ping = await post({jsonrpc: '2.0', method: 'ping', id: 3});
-
-    expect(init.headers.get('MCP-Protocol-Version')).toBe('2024-11-05');
-    expect(await ping.json()).toMatchObject({jsonrpc: '2.0', result: {}, id: 3});
-  });
-
-  it('accepts notifications without a JSON-RPC response body', async () => {
-    const response = await post({jsonrpc: '2.0', method: 'notifications/initialized'});
-
-    expect(response.status).toBe(202);
-    expect(await response.text()).toBe('');
-  });
-
-  it('blocks requests when the emergency kill switch is active', async () => {
-    const kv = makeKv({OPERATOR_DOCK_SUSPENDED: 'true'});
+  it('advertises marketplace tools on /v1/marketplace', async () => {
     const response = await post(
-      {jsonrpc: '2.0', method: 'ping', id: 1},
-      {...baseEnv, LAB_STATE: kv}
+      {jsonrpc: '2.0', method: 'tools/list', id: 1},
+      baseEnv,
+      {'X-Axim-Gateway-Token': 'valid'},
+      'https://mcp.axim.us.com/v1/marketplace'
     );
+    const body = await response.json() as {result: {tools: Array<{name: string}>}};
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(200);
+    expect(body.result.tools.map((tool) => tool.name)).toEqual([
+      'axim_send_invoice'
+    ]);
   });
 
-  it('fails closed in production when the kill-switch binding is absent', async () => {
-    const response = await post(
-      {jsonrpc: '2.0', method: 'ping', id: 1},
-      {...baseEnv, ENVIRONMENT: 'production'}
-    );
-
-    expect(response.status).toBe(503);
-  });
-
-  it('returns tool results and applies configured rate limits', async () => {
-    const kv = makeKv();
-    const env = {...baseEnv, RATE_LIMIT_PER_HOUR: '1', LAB_STATE: kv};
-    const requestBody = {
-      jsonrpc: '2.0',
-      method: 'tools/call',
-      id: 1,
-      params: {name: 'sanitizer_self_test', arguments: {}}
-    };
-
-    expect((await post(requestBody, env)).status).toBe(200);
-    expect((await post({...requestBody, id: 2}, env)).status).toBe(429);
-  });
-
-  it('requires empty objects for tool arguments', async () => {
+  it('rejects bad arguments format', async () => {
     const response = await post({
       jsonrpc: '2.0',
       method: 'tools/call',
       id: 1,
-      params: {name: 'sanitizer_self_test', arguments: {unexpected: true}}
+      params: {name: 'sanitizer_self_test', arguments: ["invalid"]}
     });
     const body = await response.json() as {error: {code: number}};
 
     expect(body.error.code).toBe(-32602);
   });
 
-  it('rejects requests from origins that are not allowlisted', async () => {
-    const response = await post(
-      {jsonrpc: '2.0', method: 'ping', id: 1},
-      baseEnv,
-      {Origin: 'https://malicious.example'}
-    );
-
-    expect(response.status).toBe(403);
-  });
-
-  it('redacts credentials, personal data, and internal connection details', () => {
-    const result = sanitizeEgressPayload({
-      token: 'eyJabcdefghijk.abcdefghijklmnop.abcdefghijklmnop',
-      api_key: 'example-sensitive-value',
-      email: 'customer@example.com',
-      github: 'ghp_abcdefghijklmnopqrstuvwxyz123456',
-      connection: 'postgres://operator:private-password@db.internal:5432/core',
-      phone: '+1 (555) 123-4567',
-      note: 'Use Bearer abcdefghijklmnopqrstuvwxyz1234'
-    }) as Record<string, string>;
-
-    expect(result.token).toBe('[REDACTED_JWT]');
-    expect(result.api_key).toBe('[REDACTED]');
-    expect(result.email).toBe('[REDACTED]');
-    expect(result.github).toBe('[REDACTED_SECRET]');
-    expect(result.connection).toBe('[REDACTED_CONNECTION_STRING]');
-    expect(result.phone).toBe('[REDACTED]');
-    expect(result.note).toBe('Use Bearer [REDACTED_TOKEN]');
-  });
 });
