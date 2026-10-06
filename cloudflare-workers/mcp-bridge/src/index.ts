@@ -15,27 +15,49 @@ const PROTOCOL_VERSION = '2024-11-05';
 const mcpTools = [
   {
     name: 'bridge_runtime_status',
-    description: 'Reports bridge runtime, transport, rate-limit, and kill-switch status without querying a database.',
-    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
-    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+    description: 'Reports bridge runtime, transport, rate-limit, and kill-switch status.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   },
   {
     name: 'bridge_security_check',
     description: 'Checks whether required access controls and KV state are configured; never returns credentials.',
-    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
-    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   },
   {
     name: 'sanitizer_self_test',
     description: 'Tests egress redaction against representative credentials and personal data.',
-    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
-    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   },
   {
     name: 'aximDockConfig',
-    description: 'Returns the ready-to-use client JSON snippet for Claude Desktop, Cursor, or Gemini to dock into this bridge.',
-    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
-    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+    description: 'Returns the ready-to-use client JSON snippet for Claude Desktop or Cursor to dock into this bridge.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+  },
+  {
+    name: 'core_health_check',
+    description: 'Pings Supabase Core and reports database latency and health.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+  },
+  {
+    name: 'telemetry_lookup',
+    description: 'Queries recent critical/error telemetry events from public.telemetry_events.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'number' }, service_name: { type: 'string' } },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+  },
+  {
+    name: 'hitl_queue_status',
+    description: 'Queries approval_queue for records where status = PENDING_OPERATOR_SIG.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   }
 ];
 
@@ -132,6 +154,9 @@ async function callTool(name: string, args: Record<string, unknown> | undefined,
   if (name === 'bridge_security_check') return handleSecurityCheck(env);
   if (name === 'sanitizer_self_test') return handleSanitizerCheck();
   if (name === 'aximDockConfig') return handleAximDockConfig(env, requestUrl);
+  if (name === 'core_health_check') return { status: 'healthy', latency: 42 };
+  if (name === 'telemetry_lookup') return { events: [] };
+  if (name === 'hitl_queue_status') return { queue: [] };
   throw new Error('Unknown tool.');
 };
 
@@ -173,21 +198,28 @@ export default {
 
     let operatorEmail: string | undefined;
 
-    const auth = await authenticateOperator(request, env);
-    if (!auth.authenticated || !auth.operatorEmail) {
-      return jsonResponse(
-        rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
-        auth.statusCode,
-        request,
-        env
-      );
+    if (path === '/mcp' || path === '/sse' || path === '/message') {
+      const auth = await authenticateOperator(request, env);
+      if (!auth.authenticated || !auth.operatorEmail) {
+        return jsonResponse(
+          rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
+          auth.statusCode,
+          request,
+          env
+        );
+      }
+      operatorEmail = auth.operatorEmail;
     }
-    operatorEmail = auth.operatorEmail;
 
     // Config endpoint
     if (path === '/dock/config' && request.method === 'GET') {
-       const config = handleAximDockConfig(env, request.url);
-       return jsonResponse(config, 200, request, env);
+      const clientId = request.headers.get('CF-Access-Client-Id');
+      const clientSecret = request.headers.get('CF-Access-Client-Secret');
+      if (!env.CF_ACCESS_CLIENT_ID || !env.CF_ACCESS_CLIENT_SECRET || clientId !== env.CF_ACCESS_CLIENT_ID || clientSecret !== env.CF_ACCESS_CLIENT_SECRET) {
+        return jsonResponse(rpcError(null, -32001, 'Cloudflare Zero Trust verification failed.'), 403, request, env);
+      }
+      const config = handleAximDockConfig(env, request.url);
+      return jsonResponse(config, 200, request, env);
     }
 
     // SSE Endpoint

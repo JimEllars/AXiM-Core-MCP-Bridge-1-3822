@@ -24,6 +24,6 @@ export function handleAximDockConfig(env: Env, requestUrl: string) {
         }
       }
     },
-    instructions: "Paste this JSON snippet into your claude_desktop_config.json under the 'mcpServers' object to dock directly into AXiM Core."
+    instructions: "Paste this JSON into your claude_desktop_config.json under 'mcpServers' to dock directly into AXiM Core."
   };
 }
