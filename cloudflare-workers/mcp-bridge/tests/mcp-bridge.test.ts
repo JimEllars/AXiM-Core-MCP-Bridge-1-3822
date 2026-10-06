@@ -106,6 +106,10 @@ describe('AXiM Core MCP bridge', () => {
 
     expect(response.status).toBe(200);
     expect(body.result.tools.map((tool) => tool.name)).toEqual([
+      'aximCoreQuery',
+      'aximCoreDispatch',
+      'aximStateSync',
+      'aximDockConfig',
       'bridge_runtime_status',
       'bridge_security_check',
       'sanitizer_self_test',
@@ -140,6 +144,115 @@ describe('AXiM Core MCP bridge', () => {
     const body = await response.json() as {error: {code: number}};
 
     expect(body.error.code).toBe(-32602);
+  });
+
+  it('establishes SSE connection on /sse', async () => {
+    const request = new Request('https://mcp.axim.us.com/sse', {
+       method: 'GET',
+       headers: { 'Origin': 'https://core.axim.us.com' }
+    });
+    const response = await worker.fetch(request, baseEnv, context);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('text/event-stream');
+  });
+
+  it('provides config on /dock/config with valid secret', async () => {
+    const request = new Request('https://mcp.axim.us.com/dock/config', {
+       method: 'GET',
+       headers: {
+          'Origin': 'https://core.axim.us.com',
+          'Authorization': 'Bearer cf-client-secret'
+       }
+    });
+    const response = await worker.fetch(request, baseEnv, context);
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.mcpServers['axim-core'].url).toBe('https://mcp.axim.us.com/sse');
+  });
+
+  it('rejects /dock/config with invalid secret', async () => {
+    const request = new Request('https://mcp.axim.us.com/dock/config', {
+       method: 'GET',
+       headers: {
+          'Origin': 'https://core.axim.us.com',
+          'Authorization': 'Bearer wrong'
+       }
+    });
+    const response = await worker.fetch(request, baseEnv, context);
+    expect(response.status).toBe(401);
+  });
+
+  it('handles aximCoreQuery successfully on /message', async () => {
+    const response = await post(
+       {
+         jsonrpc: '2.0',
+         method: 'tools/call',
+         id: 1,
+         params: { name: 'aximCoreQuery', arguments: { table: 'users' } }
+       },
+       baseEnv,
+       {},
+       'https://mcp.axim.us.com/message'
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    const content = JSON.parse(body.result.content[0].text);
+    expect(content.status).toBe('success');
+  });
+
+  it('handles aximCoreDispatch successfully on /message', async () => {
+    const response = await post(
+       {
+         jsonrpc: '2.0',
+         method: 'tools/call',
+         id: 1,
+         params: { name: 'aximCoreDispatch', arguments: { workflow_id: 'wf-123' } }
+       },
+       baseEnv,
+       {},
+       'https://mcp.axim.us.com/message'
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    const content = JSON.parse(body.result.content[0].text);
+    expect(content.status).toBe('dispatched');
+  });
+
+  it('handles aximStateSync successfully on /message', async () => {
+    const envWithKv = { ...baseEnv, LAB_STATE: makeKv() };
+    const response = await post(
+       {
+         jsonrpc: '2.0',
+         method: 'tools/call',
+         id: 1,
+         params: { name: 'aximStateSync', arguments: { action: 'set', key: 'test', value: { a: 1 } } }
+       },
+       envWithKv,
+       {},
+       'https://mcp.axim.us.com/message'
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    const content = JSON.parse(body.result.content[0].text);
+    expect(content.status).toBe('saved');
+  });
+
+  it('validates MCP initialize handshake on /message', async () => {
+    const response = await post(
+       {
+         jsonrpc: '2.0',
+         method: 'initialize',
+         id: 1,
+         params: {}
+       },
+       baseEnv,
+       {},
+       'https://mcp.axim.us.com/message'
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.result.protocolVersion).toBe('2024-11-05');
+    expect(body.result.serverInfo.name).toBe('axim-core-bridge');
   });
 
 });
