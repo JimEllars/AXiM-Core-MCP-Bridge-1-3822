@@ -159,15 +159,33 @@ export default {
       return new Response(null, {status: 204, headers});
     }
 
+    if (path !== '/sse' && path !== '/message' && path !== '/mcp' && path !== '/dock/config') {
+      return jsonResponse(rpcError(null, -32601, 'MCP endpoint not found.'), 404, request, env);
+    }
+
+    const killSwitch = await readKillSwitch(env);
+    if (killSwitch.suspended) {
+      return jsonResponse(rpcError(null, -32004, 'Operator docking is suspended.'), 503, request, env);
+    }
+    if (killSwitch.unavailable) {
+      return jsonResponse(rpcError(null, -32004, 'Bridge security state is unavailable.'), 503, request, env);
+    }
+
+    let operatorEmail: string | undefined;
+
+    const auth = await authenticateOperator(request, env);
+    if (!auth.authenticated || !auth.operatorEmail) {
+      return jsonResponse(
+        rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
+        auth.statusCode,
+        request,
+        env
+      );
+    }
+    operatorEmail = auth.operatorEmail;
+
     // Config endpoint
     if (path === '/dock/config' && request.method === 'GET') {
-       const clientId = request.headers.get('CF-Access-Client-Id');
-       const clientSecret = request.headers.get('CF-Access-Client-Secret');
-
-       if (!clientId || !clientSecret || clientId !== env.CF_ACCESS_CLIENT_ID || clientSecret !== env.CF_ACCESS_CLIENT_SECRET) {
-          return jsonResponse({error: "Unauthorized"}, 401, request, env);
-       }
-
        const config = handleAximDockConfig(env, request.url);
        return jsonResponse(config, 200, request, env);
     }
@@ -187,10 +205,6 @@ export default {
       });
 
       return new Response(stream, { headers: sseHeaders });
-    }
-
-    if (path !== '/message' && path !== '/mcp') {
-      return jsonResponse(rpcError(null, -32601, 'MCP endpoint not found.'), 404, request, env);
     }
 
     if (request.method !== 'POST') {
@@ -214,29 +228,6 @@ export default {
 
     if (!jsonMimeAccepted(request)) {
       return jsonResponse(rpcError(null, -32600, 'Accept must include application/json.'), 406, request, env);
-    }
-
-    const killSwitch = await readKillSwitch(env);
-    if (killSwitch.suspended) {
-      return jsonResponse(rpcError(null, -32004, 'Operator docking is suspended.'), 503, request, env);
-    }
-    if (killSwitch.unavailable) {
-      return jsonResponse(rpcError(null, -32004, 'Bridge security state is unavailable.'), 503, request, env);
-    }
-
-    let operatorEmail: string | undefined;
-
-    if (path === '/mcp' || path === '/message') {
-      const auth = await authenticateOperator(request, env);
-      if (!auth.authenticated || !auth.operatorEmail) {
-        return jsonResponse(
-          rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
-          auth.statusCode,
-          request,
-          env
-        );
-      }
-      operatorEmail = auth.operatorEmail;
     }
 
     const payload = await readPayload(request);

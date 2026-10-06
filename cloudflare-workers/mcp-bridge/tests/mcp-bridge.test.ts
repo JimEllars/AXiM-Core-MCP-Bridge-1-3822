@@ -109,16 +109,34 @@ describe('AXiM Core MCP bridge', () => {
   });
 
   it('establishes SSE connection on /sse', async () => {
+    mockPassport();
     const request = new Request('https://mcp.axim.us.com/sse', {
        method: 'GET',
-       headers: { 'Origin': 'https://core.axim.us.com' }
+       headers: {
+         'Origin': 'https://core.axim.us.com',
+         'Authorization': 'Bearer passport-token',
+         'CF-Access-Client-Id': 'cf-client-id',
+         'CF-Access-Client-Secret': 'cf-client-secret'
+       }
     });
     const response = await worker.fetch(request, baseEnv, context);
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('text/event-stream');
   });
 
+  it('rejects unauthenticated requests on /sse', async () => {
+    const request = new Request('https://mcp.axim.us.com/sse', {
+       method: 'GET',
+       headers: {
+         'Origin': 'https://core.axim.us.com'
+       }
+    });
+    const response = await worker.fetch(request, baseEnv, context);
+    expect([401, 403]).toContain(response.status);
+  });
+
   it('provides config on /dock/config with valid secret', async () => {
+    mockPassport();
     const request = new Request('https://mcp.axim.us.com/dock/config', {
        method: 'GET',
        headers: {
@@ -145,7 +163,37 @@ describe('AXiM Core MCP bridge', () => {
        }
     });
     const response = await worker.fetch(request, baseEnv, context);
-    expect(response.status).toBe(401);
+    expect([401, 403]).toContain(response.status);
+  });
+
+  it('fails closed when OPERATOR_DOCK_SUSPENDED is true on /sse', async () => {
+    const envWithKv = { ...baseEnv, LAB_STATE: makeKv({ OPERATOR_DOCK_SUSPENDED: 'true' }) };
+    const request = new Request('https://mcp.axim.us.com/sse', {
+       method: 'GET',
+       headers: {
+         'Origin': 'https://core.axim.us.com',
+         'Authorization': 'Bearer passport-token',
+         'CF-Access-Client-Id': 'cf-client-id',
+         'CF-Access-Client-Secret': 'cf-client-secret'
+       }
+    });
+    const response = await worker.fetch(request, envWithKv, context);
+    expect(response.status).toBe(503);
+  });
+
+  it('fails closed when OPERATOR_DOCK_SUSPENDED is true on /dock/config', async () => {
+    const envWithKv = { ...baseEnv, LAB_STATE: makeKv({ OPERATOR_DOCK_SUSPENDED: 'true' }) };
+    const request = new Request('https://mcp.axim.us.com/dock/config', {
+       method: 'GET',
+       headers: {
+         'Origin': 'https://core.axim.us.com',
+         'Authorization': 'Bearer passport-token',
+         'CF-Access-Client-Id': 'cf-client-id',
+         'CF-Access-Client-Secret': 'cf-client-secret'
+       }
+    });
+    const response = await worker.fetch(request, envWithKv, context);
+    expect(response.status).toBe(503);
   });
 
   it('fails closed when OPERATOR_DOCK_SUSPENDED is true', async () => {
