@@ -5,13 +5,15 @@ import {sanitizeEgressPayload} from './sanitizer';
 import {handleBridgeStatus} from './tools/bridgeStatus';
 import {handleSanitizerCheck} from './tools/sanitizerCheck';
 import {handleSecurityCheck} from './tools/securityCheck';
+import {handleCoreHealthCheck, handleTelemetryLookup, handleHitlQueueStatus, auditLog} from './tools/coreDiagnostics';
+import {handleSendInvoice} from './tools/sendInvoice';
 import type {Env, JsonRpcRequest} from './types';
 
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const PROTOCOL_VERSION = '2024-11-05';
 
-const tools = [
+const mcpTools = [
   {
     name: 'bridge_runtime_status',
     description: 'Reports bridge runtime, transport, rate-limit, and kill-switch status without querying a database.',
@@ -29,6 +31,65 @@ const tools = [
     description: 'Tests egress redaction against representative credentials and personal data.',
     inputSchema: {type: 'object', properties: {}, additionalProperties: false},
     annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+  },
+  {
+    name: 'core_health_check',
+    description: 'Pings Supabase REST root and returns database connectivity latency and operational status.',
+    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
+    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+  },
+  {
+    name: 'telemetry_lookup',
+    description: 'Queries telemetry_events.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number' },
+        service_name: { type: 'string' }
+      },
+      additionalProperties: false
+    },
+    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+  },
+  {
+    name: 'hitl_queue_status',
+    description: 'Queries approval_queue for records where status = PENDING_OPERATOR_SIG.',
+    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
+    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
+  }
+];
+
+const marketplaceTools = [
+  {
+    name: 'axim_send_invoice',
+    description: 'Generates an itemized commercial invoice with deterministic tax math, provisions a live Stripe checkout link, dispatches payment notification via EmailIt, and stores the record in AXiM Core.',
+    inputSchema: {
+      type: 'object',
+      required: ['client_name', 'client_email', 'items'],
+      properties: {
+        client_name: { type: 'string' },
+        client_email: { type: 'string' },
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            required: ['description', 'quantity', 'unit_price'],
+            properties: {
+              description: { type: 'string' },
+              quantity: { type: 'number' },
+              unit_price: { type: 'number' }
+            }
+          }
+        },
+        tax_rate: { type: 'number' },
+        payment_terms: { type: 'string', enum: ["Due on Receipt", "Net-15", "Net-30"] },
+        currency: { type: 'string' },
+        company_name: { type: 'string' },
+        memo: { type: 'string' }
+      },
+      additionalProperties: false
+    },
+    annotations: {readOnlyHint: false, destructiveHint: false, openWorldHint: true}
   }
 ];
 
@@ -118,16 +179,14 @@ function validId(id: JsonRpcRequest['id']): boolean {
   return id === undefined || id === null || typeof id === 'string' || typeof id === 'number';
 }
 
-function emptyArguments(value: unknown): boolean {
-  return value === undefined ||
-    (typeof value === 'object' && value !== null && !Array.isArray(value) &&
-      Object.keys(value).length === 0);
-}
-
-async function callTool(name: string, env: Env): Promise<unknown> {
+async function callTool(name: string, args: Record<string, unknown> | undefined, env: Env): Promise<unknown> {
   if (name === 'bridge_runtime_status') return handleBridgeStatus(env);
   if (name === 'bridge_security_check') return handleSecurityCheck(env);
   if (name === 'sanitizer_self_test') return handleSanitizerCheck();
+  if (name === 'core_health_check') return handleCoreHealthCheck(env);
+  if (name === 'telemetry_lookup') return handleTelemetryLookup(args, env);
+  if (name === 'hitl_queue_status') return handleHitlQueueStatus(env);
+  if (name === 'axim_send_invoice') return handleSendInvoice(args, env);
   throw new Error('Unknown tool.');
 }
 
@@ -140,7 +199,7 @@ function jsonMimeAccepted(request: Request): boolean {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
     const headers = corsHeaders(request, env);
     const origin = request.headers.get('Origin');
@@ -153,7 +212,7 @@ export default {
       return new Response(null, {status: 204, headers});
     }
 
-    if (path !== '/mcp') {
+    if (path !== '/mcp' && path !== '/v1/marketplace') {
       return jsonResponse(rpcError(null, -32601, 'MCP endpoint not found.'), 404, request, env);
     }
 
@@ -188,14 +247,24 @@ export default {
       return jsonResponse(rpcError(null, -32004, 'Bridge security state is unavailable.'), 503, request, env);
     }
 
-    const auth = await authenticateOperator(request, env);
-    if (!auth.authenticated || !auth.operatorEmail) {
-      return jsonResponse(
-        rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
-        auth.statusCode,
-        request,
-        env
-      );
+    let operatorEmail: string | undefined;
+
+    if (path === '/mcp') {
+      const auth = await authenticateOperator(request, env);
+      if (!auth.authenticated || !auth.operatorEmail) {
+        return jsonResponse(
+          rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
+          auth.statusCode,
+          request,
+          env
+        );
+      }
+      operatorEmail = auth.operatorEmail;
+    } else if (path === '/v1/marketplace') {
+      const token = request.headers.get('X-Axim-Gateway-Token') || request.headers.get('Authorization');
+      if (!token) {
+        return jsonResponse(rpcError(null, -32001, 'Gateway authorization required.'), 401, request, env);
+      }
     }
 
     const payload = await readPayload(request);
@@ -241,8 +310,10 @@ export default {
       return jsonResponse(rpcResult(payload.id, {}), 200, request, env);
     }
 
+    const availableTools = path === '/mcp' ? mcpTools : marketplaceTools;
+
     if (payload.method === 'tools/list') {
-      return jsonResponse(rpcResult(payload.id, {tools}), 200, request, env);
+      return jsonResponse(rpcResult(payload.id, {tools: availableTools}), 200, request, env);
     }
 
     if (payload.method !== 'tools/call') {
@@ -252,16 +323,26 @@ export default {
     const toolName = payload.params?.name;
     const args = payload.params?.arguments;
 
-    if (typeof toolName !== 'string' || !emptyArguments(args)) {
+    if (typeof toolName !== 'string') {
       return jsonResponse(
-        rpcError(payload.id, -32602, 'A tool name and empty object arguments are required.'),
+        rpcError(payload.id, -32602, 'A tool name is required.'),
         200,
         request,
         env
       );
     }
 
-    if (!tools.some((tool) => tool.name === toolName)) {
+    if (args !== undefined && (typeof args !== 'object' || args === null || Array.isArray(args))) {
+      return jsonResponse(
+        rpcError(payload.id, -32602, 'Arguments must be an object if provided.'),
+        200,
+        request,
+        env
+      );
+    }
+
+    const toolDef = availableTools.find((tool) => tool.name === toolName);
+    if (!toolDef) {
       return jsonResponse(
         rpcResult(payload.id, toolResult({error: 'Unknown or unavailable tool.'}, true)),
         200,
@@ -270,33 +351,43 @@ export default {
       );
     }
 
-    const rate = await enforceRateLimit(env, auth.operatorEmail);
-    if (!rate.allowed) {
-      const status = env.LAB_STATE ? 429 : 503;
-      const message = status === 429
-        ? 'Hourly tool call limit reached.'
-        : 'Production rate limiting is not configured.';
-      const retryAfter = Math.max(1, rate.resetAt - Math.floor(Date.now() / 1000));
+    if (path === '/mcp' && operatorEmail) {
+      const rate = await enforceRateLimit(env, operatorEmail);
+      if (!rate.allowed) {
+        const status = env.LAB_STATE ? 429 : 503;
+        const message = status === 429
+          ? 'Hourly tool call limit reached.'
+          : 'Production rate limiting is not configured.';
+        const retryAfter = Math.max(1, rate.resetAt - Math.floor(Date.now() / 1000));
 
-      return jsonResponse(
-        rpcError(payload.id, -32003, message),
-        status,
-        request,
-        env,
-        {'Retry-After': String(retryAfter)}
-      );
+        return jsonResponse(
+          rpcError(payload.id, -32003, message),
+          status,
+          request,
+          env,
+          {'Retry-After': String(retryAfter)}
+        );
+      }
     }
 
+    let finalResponse: Response;
     try {
-      const result = await callTool(toolName, env);
-      return jsonResponse(rpcResult(payload.id, toolResult(result)), 200, request, env);
-    } catch {
-      return jsonResponse(
-        rpcResult(payload.id, toolResult({error: 'Tool execution failed.'}, true)),
+      const result = await callTool(toolName, args, env);
+      finalResponse = jsonResponse(rpcResult(payload.id, toolResult(result)), 200, request, env);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Tool execution failed.';
+      finalResponse = jsonResponse(
+        rpcError(payload.id, -32602, msg),
         200,
         request,
         env
       );
     }
+
+    if (ctx && ctx.waitUntil) {
+      ctx.waitUntil(auditLog(env, path, toolName, operatorEmail, finalResponse.status));
+    }
+
+    return finalResponse;
   }
 };
