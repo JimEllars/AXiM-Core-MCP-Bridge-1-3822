@@ -11,8 +11,19 @@ export const aximDockConfigSchema = {
   annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
 };
 
-export async function handleAximDockConfig(args: Record<string, unknown> | undefined, env: Env): Promise<unknown> {
+export function handleAximDockConfig(env: Env, requestUrl: string) {
+  const origin = new URL(requestUrl).origin;
   return {
-    message: "Use the GET /dock/config endpoint to retrieve the configuration."
+    mcpServers: {
+      "axim-core-internal": {
+        url: `${origin}/sse`,
+        headers: {
+          "CF-Access-Client-Id": "<YOUR_CF_ACCESS_CLIENT_ID>",
+          "CF-Access-Client-Secret": "<YOUR_CF_ACCESS_CLIENT_SECRET>",
+          "Authorization": "Bearer <YOUR_PASSPORT_TOKEN>"
+        }
+      }
+    },
+    instructions: "Paste this JSON snippet into your claude_desktop_config.json under the 'mcpServers' object to dock directly into AXiM Core."
   };
 }

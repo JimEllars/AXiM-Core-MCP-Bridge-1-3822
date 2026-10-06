@@ -21,7 +21,9 @@ function App() {
     // Initial tool list (simulate)
     setTools([
       { name: 'bridge_runtime_status', schema: '{}', latency: '12ms' },
-      { name: 'aximCoreQuery', schema: '{ table, filter }', latency: '45ms' }
+      { name: 'bridge_security_check', schema: '{}', latency: '45ms' },
+      { name: 'sanitizer_self_test', schema: '{}', latency: '8ms' },
+      { name: 'aximDockConfig', schema: '{}', latency: '5ms' }
     ]);
 
     // Simulate audit log
@@ -34,7 +36,11 @@ function App() {
   const handleGenerateConfig = async () => {
     try {
       const res = await fetch(`${workerDomain}/dock/config`, {
-        headers: { 'Authorization': `Bearer ${bridgeSecret}` }
+        headers: {
+          'Authorization': `Bearer ${bridgeSecret}`,
+          'CF-Access-Client-Id': 'cf-client-id',
+          'CF-Access-Client-Secret': 'cf-client-secret'
+        }
       });
       if (res.ok) {
         const config = await res.json();
@@ -74,6 +80,7 @@ function App() {
             <p><span className="text-gray-400">Status:</span> <span className={telemetry.status === 'Online' ? 'text-green-500' : 'text-red-500'}>{telemetry.status}</span></p>
             <p><span className="text-gray-400">Ping:</span> {telemetry.ping}</p>
             <p><span className="text-gray-400">Uptime:</span> {telemetry.uptime}</p>
+            <p><span className="text-gray-400">Endpoints:</span> <span className="text-blue-300">/mcp, /sse</span></p>
             <p><span className="text-gray-400">Kill Switch:</span> {telemetry.suspended ? <span className="text-red-500 font-bold">ENGAGED</span> : <span className="text-green-500">DISARMED</span>}</p>
           </div>
         </div>

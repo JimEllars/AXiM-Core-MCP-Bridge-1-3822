@@ -5,12 +5,7 @@ import {sanitizeEgressPayload} from './sanitizer';
 import {handleBridgeStatus} from './tools/bridgeStatus';
 import {handleSanitizerCheck} from './tools/sanitizerCheck';
 import {handleSecurityCheck} from './tools/securityCheck';
-import {handleCoreHealthCheck, handleTelemetryLookup, handleHitlQueueStatus, auditLog} from './tools/coreDiagnostics';
-import {handleSendInvoice} from './tools/sendInvoice';
-import {handleAximCoreQuery, aximCoreQuerySchema} from './tools/aximCoreQuery';
-import {handleAximCoreDispatch, aximCoreDispatchSchema} from './tools/aximCoreDispatch';
-import {handleAximStateSync, aximStateSyncSchema} from './tools/aximStateSync';
-import {handleAximDockConfig, aximDockConfigSchema} from './tools/aximDockConfig';
+import {handleAximDockConfig} from './tools/aximDockConfig';
 import type {Env, JsonRpcRequest} from './types';
 
 const MAX_REQUEST_BYTES = 64 * 1024;
@@ -18,10 +13,6 @@ const MAX_RESPONSE_BYTES = 256 * 1024;
 const PROTOCOL_VERSION = '2024-11-05';
 
 const mcpTools = [
-  aximCoreQuerySchema,
-  aximCoreDispatchSchema,
-  aximStateSyncSchema,
-  aximDockConfigSchema,
   {
     name: 'bridge_runtime_status',
     description: 'Reports bridge runtime, transport, rate-limit, and kill-switch status without querying a database.',
@@ -30,7 +21,7 @@ const mcpTools = [
   },
   {
     name: 'bridge_security_check',
-    description: 'Checks whether required access controls are configured; never returns credentials.',
+    description: 'Checks whether required access controls and KV state are configured; never returns credentials.',
     inputSchema: {type: 'object', properties: {}, additionalProperties: false},
     annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
   },
@@ -41,65 +32,14 @@ const mcpTools = [
     annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
   },
   {
-    name: 'core_health_check',
-    description: 'Pings Supabase REST root and returns database connectivity latency and operational status.',
-    inputSchema: {type: 'object', properties: {}, additionalProperties: false},
-    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
-  },
-  {
-    name: 'telemetry_lookup',
-    description: 'Queries telemetry_events.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number' },
-        service_name: { type: 'string' }
-      },
-      additionalProperties: false
-    },
-    annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
-  },
-  {
-    name: 'hitl_queue_status',
-    description: 'Queries approval_queue for records where status = PENDING_OPERATOR_SIG.',
+    name: 'aximDockConfig',
+    description: 'Returns the ready-to-use client JSON snippet for Claude Desktop, Cursor, or Gemini to dock into this bridge.',
     inputSchema: {type: 'object', properties: {}, additionalProperties: false},
     annotations: {readOnlyHint: true, destructiveHint: false, openWorldHint: false}
   }
 ];
 
-const marketplaceTools = [
-  {
-    name: 'axim_send_invoice',
-    description: 'Generates an itemized commercial invoice with deterministic tax math, provisions a live Stripe checkout link, dispatches payment notification via EmailIt, and stores the record in AXiM Core.',
-    inputSchema: {
-      type: 'object',
-      required: ['client_name', 'client_email', 'items'],
-      properties: {
-        client_name: { type: 'string' },
-        client_email: { type: 'string' },
-        items: {
-          type: 'array',
-          items: {
-            type: 'object',
-            required: ['description', 'quantity', 'unit_price'],
-            properties: {
-              description: { type: 'string' },
-              quantity: { type: 'number' },
-              unit_price: { type: 'number' }
-            }
-          }
-        },
-        tax_rate: { type: 'number' },
-        payment_terms: { type: 'string', enum: ["Due on Receipt", "Net-15", "Net-30"] },
-        currency: { type: 'string' },
-        company_name: { type: 'string' },
-        memo: { type: 'string' }
-      },
-      additionalProperties: false
-    },
-    annotations: {readOnlyHint: false, destructiveHint: false, openWorldHint: true}
-  }
-];
+
 
 function corsHeaders(request: Request, env: Env): Headers {
   const allowedOrigins = (env.ALLOWED_ORIGINS ?? '')
@@ -187,20 +127,14 @@ function validId(id: JsonRpcRequest['id']): boolean {
   return id === undefined || id === null || typeof id === 'string' || typeof id === 'number';
 }
 
-async function callTool(name: string, args: Record<string, unknown> | undefined, env: Env): Promise<unknown> {
+async function callTool(name: string, args: Record<string, unknown> | undefined, env: Env, requestUrl: string): Promise<unknown> {
   if (name === 'bridge_runtime_status') return handleBridgeStatus(env);
   if (name === 'bridge_security_check') return handleSecurityCheck(env);
   if (name === 'sanitizer_self_test') return handleSanitizerCheck();
-  if (name === 'core_health_check') return handleCoreHealthCheck(env);
-  if (name === 'telemetry_lookup') return handleTelemetryLookup(args, env);
-  if (name === 'hitl_queue_status') return handleHitlQueueStatus(env);
-  if (name === 'axim_send_invoice') return handleSendInvoice(args, env);
-  if (name === 'aximCoreQuery') return handleAximCoreQuery(args, env);
-  if (name === 'aximCoreDispatch') return handleAximCoreDispatch(args, env);
-  if (name === 'aximStateSync') return handleAximStateSync(args, env);
-  if (name === 'aximDockConfig') return handleAximDockConfig(args, env);
+  if (name === 'aximDockConfig') return handleAximDockConfig(env, requestUrl);
   throw new Error('Unknown tool.');
-}
+};
+
 
 function jsonMimeAccepted(request: Request): boolean {
   const accepted = (request.headers.get('Accept') ?? '*/*')
@@ -209,7 +143,6 @@ function jsonMimeAccepted(request: Request): boolean {
 
   return accepted.includes('*/*') || accepted.includes('application/json');
 }
-
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -228,23 +161,14 @@ export default {
 
     // Config endpoint
     if (path === '/dock/config' && request.method === 'GET') {
-       const authHeader = request.headers.get('Authorization');
-       const expectedSecret = env.CF_ACCESS_CLIENT_SECRET || 'BRIDGE_SECRET'; // using secret for demo
-       if (!authHeader || !authHeader.includes(expectedSecret)) {
+       const clientId = request.headers.get('CF-Access-Client-Id');
+       const clientSecret = request.headers.get('CF-Access-Client-Secret');
+
+       if (!clientId || !clientSecret || clientId !== env.CF_ACCESS_CLIENT_ID || clientSecret !== env.CF_ACCESS_CLIENT_SECRET) {
           return jsonResponse({error: "Unauthorized"}, 401, request, env);
        }
 
-       const domain = url.origin;
-       const config = {
-          mcpServers: {
-             "axim-core": {
-                url: `${domain}/sse`,
-                headers: {
-                   "Authorization": `Bearer ${expectedSecret}`
-                }
-             }
-          }
-       };
+       const config = handleAximDockConfig(env, request.url);
        return jsonResponse(config, 200, request, env);
     }
 
@@ -259,23 +183,13 @@ export default {
         start(controller) {
           const endpointEvent = `event: endpoint\ndata: ${url.origin}/message\n\n`;
           controller.enqueue(new TextEncoder().encode(endpointEvent));
-
-          // Optional keepalive ping
-          // const interval = setInterval(() => {
-          //   controller.enqueue(new TextEncoder().encode(': ping\n\n'));
-          // }, 15000);
-
-          // request.signal.addEventListener('abort', () => {
-          //   clearInterval(interval);
-          //   controller.close();
-          // });
         }
       });
 
       return new Response(stream, { headers: sseHeaders });
     }
 
-    if (path !== '/message' && path !== '/mcp' && path !== '/v1/marketplace') {
+    if (path !== '/message' && path !== '/mcp') {
       return jsonResponse(rpcError(null, -32601, 'MCP endpoint not found.'), 404, request, env);
     }
 
@@ -313,30 +227,16 @@ export default {
     let operatorEmail: string | undefined;
 
     if (path === '/mcp' || path === '/message') {
-      // In the requirement: POST /message must handle requests
-      // For local testing in wrangler dev we might bypass passport or just mock it.
-      // Keeping original auth if present.
-      const authHeader = request.headers.get('Authorization');
-      // Simple mock for local dev if 'YOUR_TEST_TOKEN'
-      if (authHeader && authHeader.includes('YOUR_TEST_TOKEN')) {
-          operatorEmail = 'test@example.com';
-      } else {
-         const auth = await authenticateOperator(request, env);
-         if (!auth.authenticated || !auth.operatorEmail) {
-           return jsonResponse(
-             rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
-             auth.statusCode,
-             request,
-             env
-           );
-         }
-         operatorEmail = auth.operatorEmail;
+      const auth = await authenticateOperator(request, env);
+      if (!auth.authenticated || !auth.operatorEmail) {
+        return jsonResponse(
+          rpcError(null, -32001, auth.error ?? 'Unauthorized.'),
+          auth.statusCode,
+          request,
+          env
+        );
       }
-    } else if (path === '/v1/marketplace') {
-      const token = request.headers.get('X-Axim-Gateway-Token') || request.headers.get('Authorization');
-      if (!token) {
-        return jsonResponse(rpcError(null, -32001, 'Gateway authorization required.'), 401, request, env);
-      }
+      operatorEmail = auth.operatorEmail;
     }
 
     const payload = await readPayload(request);
@@ -382,7 +282,7 @@ export default {
       return jsonResponse(rpcResult(payload.id, {}), 200, request, env);
     }
 
-    const availableTools = (path === '/mcp' || path === '/message') ? mcpTools : marketplaceTools;
+    const availableTools = mcpTools;
 
     if (payload.method === 'tools/list') {
       return jsonResponse(rpcResult(payload.id, {tools: availableTools}), 200, request, env);
@@ -423,7 +323,7 @@ export default {
       );
     }
 
-    if ((path === '/mcp' || path === '/message') && operatorEmail && operatorEmail !== 'test@example.com') {
+    if ((path === '/mcp' || path === '/message') && operatorEmail) {
       const rate = await enforceRateLimit(env, operatorEmail);
       if (!rate.allowed) {
         const status = env.LAB_STATE ? 429 : 503;
@@ -444,8 +344,8 @@ export default {
 
     let finalResponse: Response;
     try {
-      const result = await callTool(toolName, args, env);
-      finalResponse = jsonResponse(rpcResult(payload.id, toolResult(result)), 200, request, env);
+      const result = await callTool(toolName, args, env, request.url);
+      finalResponse = jsonResponse(rpcResult(payload.id, sanitizeEgressPayload(toolResult(result))), 200, request, env);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Tool execution failed.';
       finalResponse = jsonResponse(
@@ -454,10 +354,6 @@ export default {
         request,
         env
       );
-    }
-
-    if (ctx && ctx.waitUntil) {
-      ctx.waitUntil(auditLog(env, path, toolName, operatorEmail, finalResponse.status));
     }
 
     return finalResponse;

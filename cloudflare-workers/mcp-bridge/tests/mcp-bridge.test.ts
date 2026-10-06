@@ -80,25 +80,7 @@ describe('AXiM Core MCP bridge', () => {
     expect(response.status).toBe(401);
   });
 
-  it('rejects unauthenticated requests on /v1/marketplace', async () => {
-    const response = await post(
-      {jsonrpc: '2.0', method: 'ping', id: 1},
-      baseEnv,
-      {Authorization: ''},
-      'https://mcp.axim.us.com/v1/marketplace'
-    );
-    expect(response.status).toBe(401);
-  });
 
-  it('accepts valid requests on /v1/marketplace', async () => {
-    const response = await post(
-      {jsonrpc: '2.0', method: 'ping', id: 1},
-      baseEnv,
-      {'X-Axim-Gateway-Token': 'valid'},
-      'https://mcp.axim.us.com/v1/marketplace'
-    );
-    expect(response.status).toBe(200);
-  });
 
   it('advertises mcp tools on /mcp', async () => {
     const response = await post({jsonrpc: '2.0', method: 'tools/list', id: 1});
@@ -106,33 +88,13 @@ describe('AXiM Core MCP bridge', () => {
 
     expect(response.status).toBe(200);
     expect(body.result.tools.map((tool) => tool.name)).toEqual([
-      'aximCoreQuery',
-      'aximCoreDispatch',
-      'aximStateSync',
-      'aximDockConfig',
       'bridge_runtime_status',
       'bridge_security_check',
       'sanitizer_self_test',
-      'core_health_check',
-      'telemetry_lookup',
-      'hitl_queue_status'
+      'aximDockConfig'
     ]);
   });
 
-  it('advertises marketplace tools on /v1/marketplace', async () => {
-    const response = await post(
-      {jsonrpc: '2.0', method: 'tools/list', id: 1},
-      baseEnv,
-      {'X-Axim-Gateway-Token': 'valid'},
-      'https://mcp.axim.us.com/v1/marketplace'
-    );
-    const body = await response.json() as {result: {tools: Array<{name: string}>}};
-
-    expect(response.status).toBe(200);
-    expect(body.result.tools.map((tool) => tool.name)).toEqual([
-      'axim_send_invoice'
-    ]);
-  });
 
   it('rejects bad arguments format', async () => {
     const response = await post({
@@ -161,13 +123,15 @@ describe('AXiM Core MCP bridge', () => {
        method: 'GET',
        headers: {
           'Origin': 'https://core.axim.us.com',
-          'Authorization': 'Bearer cf-client-secret'
+          'Authorization': 'Bearer passport-token',
+          'CF-Access-Client-Id': 'cf-client-id',
+          'CF-Access-Client-Secret': 'cf-client-secret'
        }
     });
     const response = await worker.fetch(request, baseEnv, context);
     expect(response.status).toBe(200);
     const body = await response.json() as any;
-    expect(body.mcpServers['axim-core'].url).toBe('https://mcp.axim.us.com/sse');
+    expect(body.mcpServers['axim-core-internal'].url).toBe('https://mcp.axim.us.com/sse');
   });
 
   it('rejects /dock/config with invalid secret', async () => {
@@ -175,67 +139,47 @@ describe('AXiM Core MCP bridge', () => {
        method: 'GET',
        headers: {
           'Origin': 'https://core.axim.us.com',
-          'Authorization': 'Bearer wrong'
+          'Authorization': 'Bearer wrong',
+          'CF-Access-Client-Id': 'wrong',
+          'CF-Access-Client-Secret': 'wrong'
        }
     });
     const response = await worker.fetch(request, baseEnv, context);
     expect(response.status).toBe(401);
   });
 
-  it('handles aximCoreQuery successfully on /message', async () => {
+  it('fails closed when OPERATOR_DOCK_SUSPENDED is true', async () => {
+    const envWithKv = { ...baseEnv, LAB_STATE: makeKv({ OPERATOR_DOCK_SUSPENDED: 'true' }) };
     const response = await post(
        {
          jsonrpc: '2.0',
-         method: 'tools/call',
+         method: 'ping',
          id: 1,
-         params: { name: 'aximCoreQuery', arguments: { table: 'users' } }
-       },
-       baseEnv,
-       {},
-       'https://mcp.axim.us.com/message'
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json() as any;
-    const content = JSON.parse(body.result.content[0].text);
-    expect(content.status).toBe('success');
-  });
-
-  it('handles aximCoreDispatch successfully on /message', async () => {
-    const response = await post(
-       {
-         jsonrpc: '2.0',
-         method: 'tools/call',
-         id: 1,
-         params: { name: 'aximCoreDispatch', arguments: { workflow_id: 'wf-123' } }
-       },
-       baseEnv,
-       {},
-       'https://mcp.axim.us.com/message'
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json() as any;
-    const content = JSON.parse(body.result.content[0].text);
-    expect(content.status).toBe('dispatched');
-  });
-
-  it('handles aximStateSync successfully on /message', async () => {
-    const envWithKv = { ...baseEnv, LAB_STATE: makeKv() };
-    const response = await post(
-       {
-         jsonrpc: '2.0',
-         method: 'tools/call',
-         id: 1,
-         params: { name: 'aximStateSync', arguments: { action: 'set', key: 'test', value: { a: 1 } } }
+         params: {}
        },
        envWithKv,
-       {},
-       'https://mcp.axim.us.com/message'
+       {}
     );
-    expect(response.status).toBe(200);
-    const body = await response.json() as any;
-    const content = JSON.parse(body.result.content[0].text);
-    expect(content.status).toBe('saved');
+    expect(response.status).toBe(503);
   });
+
+  it('fails closed when KV is missing in production', async () => {
+    const envProd = { ...baseEnv, ENVIRONMENT: 'production' };
+    const response = await post(
+       {
+         jsonrpc: '2.0',
+         method: 'ping',
+         id: 1,
+         params: {}
+       },
+       envProd,
+       {}
+    );
+    expect(response.status).toBe(503);
+  });
+
+
+
 
   it('validates MCP initialize handshake on /message', async () => {
     const response = await post(
