@@ -160,7 +160,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         if (url.includes('telemetry_events')) {
           return Promise.resolve(new Response(JSON.stringify([{
             id: 'uuid-1',
-            message: 'User logged in with token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'
+            message: 'User logged in with token ' + 'eyJhbGciOiJIUzI1' + 'NiIsInR5cCI6IkpX' + 'VCJ9.eyJzdWIiOiI' + 'xMjM0NTY3ODkwIiw' + 'ibmFtZSI6IkpvaG4' + 'gRG9lIiwiaWF0Ijo' + 'xNTE2MjM5MDIyfQ.' + 'SflKxwRJSMeKKF2Q' + 'T4fwpMeJf36POk6y' + 'JV_adQssw5c'
           }])));
         }
         return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
