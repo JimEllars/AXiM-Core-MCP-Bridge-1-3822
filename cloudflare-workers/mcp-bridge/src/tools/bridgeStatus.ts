@@ -20,7 +20,11 @@ export async function handleBridgeStatus(env: Env) {
           ? 'UNAVAILABLE'
           : 'ACTIVE'
       : 'NOT_CONFIGURED',
-    database_diagnostics: 'Not enabled; connect a backend before enabling database tools',
+    database_diagnostics: env.SUPABASE_URL
+      ? env.SUPABASE_SERVICE_ROLE_KEY
+        ? 'CONFIGURED'
+        : 'SUPABASE_URL_CONFIGURED_MISSING_KEY'
+      : 'NOT_CONFIGURED',
     timestamp: new Date().toISOString()
   };
 }
