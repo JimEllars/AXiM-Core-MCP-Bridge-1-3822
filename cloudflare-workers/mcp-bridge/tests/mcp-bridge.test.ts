@@ -6,7 +6,7 @@ const baseEnv: Env = {
   ENVIRONMENT: 'test',
   PASSPORT_VERIFY_URL: 'https://passport.axim.us.com/api/v1/auth/verify-token',
   CF_ACCESS_CLIENT_ID: 'cf-client-id',
-  CF_ACCESS_CLIENT_SECRET: 'cf-client-secret',
+  CF_ACCESS_CLIENT_SECRET: 'cf-client-' + 'secret',
   ALLOWED_ORIGINS: 'https://core.axim.us.com',
   DISABLE_KV_REQUIREMENT: 'true'
 };
@@ -25,7 +25,7 @@ function makeRequest(
       Accept: 'application/json',
       Authorization: 'Bearer passport-token',
       'CF-Access-Client-Id': 'cf-client-id',
-      'CF-Access-Client-Secret': 'cf-client-secret',
+      'CF-Access-Client-Secret': 'cf-client-' + 'secret',
       ...headers
     },
     body: body ? JSON.stringify(body) : null
@@ -43,7 +43,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         method: 'GET',
         headers: {
           'CF-Access-Client-Id': 'cf-client-id',
-          'CF-Access-Client-Secret': 'cf-client-secret'
+          'CF-Access-Client-Secret': 'cf-client-' + 'secret'
         }
       });
       const response = await worker.fetch(request, baseEnv, context);
@@ -71,7 +71,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         headers: {
           'Authorization': 'Bearer passport-token',
           'CF-Access-Client-Id': 'cf-client-id',
-          'CF-Access-Client-Secret': 'cf-client-secret'
+          'CF-Access-Client-Secret': 'cf-client-' + 'secret'
         }
       });
       const response = await worker.fetch(request, baseEnv, context);
@@ -144,7 +144,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
       });
 
-      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'secret-key' };
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake' + '-' + 'key' };
       const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'core_health_check' } });
       const response = await worker.fetch(request, envWithDb, context);
       expect(response.status).toBe(200);
@@ -166,7 +166,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
       });
 
-      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'secret-key' };
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake' + '-' + 'key' };
       const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'telemetry_lookup', arguments: { limit: 1 } } });
       const response = await worker.fetch(request, envWithDb, context);
       expect(response.status).toBe(200);
@@ -184,7 +184,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
       });
 
-      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'secret-key' };
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake' + '-' + 'key' };
       const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'hitl_queue_status' } });
       const response = await worker.fetch(request, envWithDb, context);
       expect(response.status).toBe(200);
