@@ -1,3 +1,8 @@
+import {
+  handleCoreHealthCheck,
+  handleTelemetryLookup,
+  handleHitlQueueStatus
+} from './tools/coreObservability';
 import {authenticateOperator} from './auth';
 import {readKillSwitch} from './killSwitch';
 import {enforceRateLimit} from './rateLimit';
@@ -154,11 +159,11 @@ async function callTool(name: string, args: Record<string, unknown> | undefined,
   if (name === 'bridge_security_check') return handleSecurityCheck(env);
   if (name === 'sanitizer_self_test') return handleSanitizerCheck();
   if (name === 'aximDockConfig') return handleAximDockConfig(env, requestUrl);
-  if (name === 'core_health_check') return { status: 'healthy', latency: 42 };
-  if (name === 'telemetry_lookup') return { events: [] };
-  if (name === 'hitl_queue_status') return { queue: [] };
+  if (name === 'core_health_check') return handleCoreHealthCheck(env);
+  if (name === 'telemetry_lookup') return handleTelemetryLookup(args, env);
+  if (name === 'hitl_queue_status') return handleHitlQueueStatus(env);
   throw new Error('Unknown tool.');
-};
+}
 
 
 function jsonMimeAccepted(request: Request): boolean {
@@ -367,8 +372,9 @@ export default {
 
     let finalResponse: Response;
     try {
-      const result = await callTool(toolName, args, env, request.url);
-      finalResponse = jsonResponse(rpcResult(payload.id, sanitizeEgressPayload(toolResult(result))), 200, request, env);
+      const rawResult = await callTool(toolName, args, env, request.url);
+      const sanitizedResult = sanitizeEgressPayload(rawResult);
+      finalResponse = jsonResponse(rpcResult(payload.id, toolResult(sanitizedResult)), 200, request, env);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Tool execution failed.';
       finalResponse = jsonResponse(

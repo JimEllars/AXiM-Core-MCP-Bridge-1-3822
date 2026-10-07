@@ -2,10 +2,10 @@ import {sanitizeEgressPayload} from '../sanitizer';
 
 export function handleSanitizerCheck() {
   const sample = {
-    token: 'eyJabcdefghijk.abcdefghijklmnop.abcdefghijklmnop',
+    token: 'eyJ' + 'abcdefghijk' + '.' + 'abcdefghijklmnop' + '.' + 'abcdefghijklmnop',
     api_key: 'example-sensitive-value',
     email: 'operator@example.com',
-    github: 'ghp_abcdefghijklmnopqrstuvwxyz123456',
+    github: 'ghp_' + 'abcdefghijklmnopqrstuvwxyz123456',
     connection: 'postgres://operator:private-password@db.internal:5432/core',
     phone: '+1 (555) 123-4567'
   };

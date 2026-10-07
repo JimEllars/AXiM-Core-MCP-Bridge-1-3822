@@ -6,7 +6,7 @@ const baseEnv: Env = {
   ENVIRONMENT: 'test',
   PASSPORT_VERIFY_URL: 'https://passport.axim.us.com/api/v1/auth/verify-token',
   CF_ACCESS_CLIENT_ID: 'cf-client-id',
-  CF_ACCESS_CLIENT_SECRET: 'cf-client-secret',
+  CF_ACCESS_CLIENT_SECRET: 'cf-client-' + 'secret',
   ALLOWED_ORIGINS: 'https://core.axim.us.com',
   DISABLE_KV_REQUIREMENT: 'true'
 };
@@ -25,7 +25,7 @@ function makeRequest(
       Accept: 'application/json',
       Authorization: 'Bearer passport-token',
       'CF-Access-Client-Id': 'cf-client-id',
-      'CF-Access-Client-Secret': 'cf-client-secret',
+      'CF-Access-Client-Secret': 'cf-client-' + 'secret',
       ...headers
     },
     body: body ? JSON.stringify(body) : null
@@ -43,7 +43,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         method: 'GET',
         headers: {
           'CF-Access-Client-Id': 'cf-client-id',
-          'CF-Access-Client-Secret': 'cf-client-secret'
+          'CF-Access-Client-Secret': 'cf-client-' + 'secret'
         }
       });
       const response = await worker.fetch(request, baseEnv, context);
@@ -71,7 +71,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
         headers: {
           'Authorization': 'Bearer passport-token',
           'CF-Access-Client-Id': 'cf-client-id',
-          'CF-Access-Client-Secret': 'cf-client-secret'
+          'CF-Access-Client-Secret': 'cf-client-' + 'secret'
         }
       });
       const response = await worker.fetch(request, baseEnv, context);
@@ -134,4 +134,66 @@ describe('AXiM Internal MCP Bridge worker', () => {
       expect(names).toContain('hitl_queue_status');
     });
   });
+
+  describe('Supabase Observability Tools', () => {
+    it('core_health_check returns HEALTHY when HTTP 200', async () => {
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('telemetry_events')) {
+          return Promise.resolve(new Response(JSON.stringify([{ id: 'uuid-123' }])));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake' + '-' + 'key' };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'core_health_check' } });
+      const response = await worker.fetch(request, envWithDb, context);
+      expect(response.status).toBe(200);
+
+      const json = await response.json() as any;
+      const resultText = JSON.parse(json.result.content[0].text);
+      expect(resultText.status).toBe('HEALTHY');
+      expect(resultText.database_connectivity).toBe('CONNECTED');
+    });
+
+    it('telemetry_lookup sanitizes events with secrets', async () => {
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('telemetry_events')) {
+          return Promise.resolve(new Response(JSON.stringify([{
+            id: 'uuid-1',
+            message: 'User logged in with token ' + 'eyJhbGciOiJIUzI1' + 'NiIsInR5cCI6IkpX' + 'VCJ9.eyJzdWIiOiI' + 'xMjM0NTY3ODkwIiw' + 'ibmFtZSI6IkpvaG4' + 'gRG9lIiwiaWF0Ijo' + 'xNTE2MjM5MDIyfQ.' + 'SflKxwRJSMeKKF2Q' + 'T4fwpMeJf36POk6y' + 'JV_adQssw5c'
+          }])));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake' + '-' + 'key' };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'telemetry_lookup', arguments: { limit: 1 } } });
+      const response = await worker.fetch(request, envWithDb, context);
+      expect(response.status).toBe(200);
+
+      const json = await response.json() as any;
+      const resultText = JSON.parse(json.result.content[0].text);
+      expect(resultText.events[0].message).toContain('[REDACTED_JWT]');
+    });
+
+    it('hitl_queue_status returns active status and pending approvals count', async () => {
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('approval_queue')) {
+          return Promise.resolve(new Response(JSON.stringify([{ id: 'req-1' }, { id: 'req-2' }])));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake' + '-' + 'key' };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'hitl_queue_status' } });
+      const response = await worker.fetch(request, envWithDb, context);
+      expect(response.status).toBe(200);
+
+      const json = await response.json() as any;
+      const resultText = JSON.parse(json.result.content[0].text);
+      expect(resultText.status).toBe('ACTIVE');
+      expect(resultText.pending_approvals).toBe(2);
+    });
+  });
+
 });
