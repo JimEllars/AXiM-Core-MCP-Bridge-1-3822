@@ -1,7 +1,8 @@
 name = "axim-core-mcp"
 main = "src/index.ts"
-compatibility_date = "2026-07-09"
+compatibility_date = "2026-09-13"
 compatibility_flags = ["nodejs_compat"]
+preview_urls = false
 
 [vars]
 ENVIRONMENT = "production"
@@ -14,4 +15,8 @@ RATE_LIMIT_PER_HOUR = "60"
 # Run 'npx wrangler kv:namespace create LAB_STATE' and insert the namespace id below:
 [[kv_namespaces]]
 binding = "LAB_STATE"
-id = "YOUR_KV_NAMESPACE_ID"
+id = "f859e905dad84e17b9556b749fcd1379"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
