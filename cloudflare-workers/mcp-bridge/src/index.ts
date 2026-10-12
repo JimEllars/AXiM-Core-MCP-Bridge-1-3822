@@ -1,7 +1,8 @@
 import {
   handleCoreHealthCheck,
   handleTelemetryLookup,
-  handleHitlQueueStatus
+  handleHitlQueueStatus,
+  recordMcpAuditLog
 } from './tools/coreObservability';
 import {authenticateOperator} from './auth';
 import {readKillSwitch} from './killSwitch';
@@ -53,14 +54,19 @@ const mcpTools = [
     description: 'Queries recent critical/error telemetry events from public.telemetry_events.',
     inputSchema: {
       type: 'object',
-      properties: { limit: { type: 'number' }, service_name: { type: 'string' } },
+      properties: {
+        limit: { type: 'number', description: 'Maximum events to return (default 5, max 25).' },
+        service_name: { type: 'string', description: 'Filter by service or component name.' },
+        component: { type: 'string', description: 'Alias for service_name filter.' },
+        severity: { type: 'string', description: 'Filter by severity level (e.g. ERROR, CRITICAL, WARN).' }
+      },
       additionalProperties: false
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   },
   {
     name: 'hitl_queue_status',
-    description: 'Queries approval_queue for records where status = PENDING_OPERATOR_SIG.',
+    description: 'Queries approval_queue for records where status = PENDING_OPERATOR_SIGNATURE.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   }
@@ -370,6 +376,7 @@ export default {
       }
     }
 
+    const callStart = Date.now();
     let finalResponse: Response;
     try {
       const rawResult = await callTool(toolName, args, env, request.url);
@@ -383,6 +390,11 @@ export default {
         request,
         env
       );
+    }
+
+    if (ctx && typeof ctx.waitUntil === 'function') {
+      const duration = Date.now() - callStart;
+      ctx.waitUntil(recordMcpAuditLog(env, path, toolName, operatorEmail, finalResponse.status, duration));
     }
 
     return finalResponse;

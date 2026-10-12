@@ -4,6 +4,7 @@ function App() {
   const [telemetry, setTelemetry] = useState({ ping: '...', uptime: '...', status: 'Unknown', suspended: false });
   const [tools, setTools] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
+  const [activeToolResult, setActiveToolResult] = useState(null);
   const [bridgeSecret, setBridgeSecret] = useState('');
   const [bridgeUrl, setBridgeUrl] = useState(window.location.hostname === 'localhost' ? 'http://localhost:8787' : window.location.origin);
   const [clientId, setClientId] = useState('');
@@ -30,33 +31,74 @@ function App() {
     ]);
   }, []);
 
-  const handleGenerateConfig = async () => {
+  const handleRunTool = async (toolName) => {
+    const start = Date.now();
     try {
-      const res = await fetch(`${bridgeUrl}/dock/config`, {
+      let args = {};
+      if (toolName === 'telemetry_lookup') {
+        args = { limit: 2 };
+      }
+
+      const payload = {
+        jsonrpc: '2.0',
+        id: `run-${Date.now()}`,
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: args
+        }
+      };
+
+      const res = await fetch(`${bridgeUrl}/mcp`, {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
           'Authorization': `Bearer ${bridgeSecret}`,
           'CF-Access-Client-Id': clientId,
           'CF-Access-Client-Secret': clientSecret
-        }
+        },
+        body: JSON.stringify(payload)
       });
+      const end = Date.now();
+      const latency = end - start;
+      const status = res.ok ? 'OK' : `HTTP_${res.status}`;
+
+      let data = {};
       if (res.ok) {
-        const config = await res.json();
-        setDockConfig(config);
-      } else {
-        alert('Failed to generate config. Check secret and CF credentials.');
+        data = await res.json();
       }
+
+      setActiveToolResult({ tool: toolName, data, latency });
+
+      setAuditLog(prev => [
+        { id: Date.now(), time: new Date().toLocaleTimeString(), method: toolName, status },
+        ...prev
+      ]);
     } catch (e) {
-      console.error(e);
-      // Fallback for dev/UI testing without real backend
-      setDockConfig({
-        mcpServers: {
-          "axim-core": {
-            url: `${bridgeUrl}/sse`,
-            headers: { Authorization: `Bearer ${bridgeSecret || 'YOUR_TOKEN'}` }
+      const end = Date.now();
+      setActiveToolResult({ tool: toolName, data: { error: e.message }, latency: end - start });
+      setAuditLog(prev => [
+        { id: Date.now(), time: new Date().toLocaleTimeString(), method: toolName, status: 'ERROR' },
+        ...prev
+      ]);
+    }
+  };
+
+  const handleGenerateConfig = async () => {
+    const config = {
+      mcpServers: {
+        "axim-core-internal": {
+          url: `${bridgeUrl}/sse`,
+          headers: {
+            "CF-Access-Client-Id": clientId || "<YOUR_CF_ACCESS_CLIENT_ID>",
+            "CF-Access-Client-Secret": clientSecret || "<YOUR_CF_ACCESS_CLIENT_SECRET>",
+            "Authorization": `Bearer ${bridgeSecret || "<YOUR_PASSPORT_TOKEN>"}`
           }
         }
-      });
-    }
+      }
+    };
+    setDockConfig(config);
   };
 
   const handleHealthProbe = async () => {
@@ -213,21 +255,45 @@ function App() {
                   <th className="py-2 text-gray-400">Description</th>
                   <th className="py-2 text-gray-400">Schema Summary</th>
                   <th className="py-2 text-gray-400">Usage Latency</th>
+                  <th className="py-2 text-gray-400">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {tools.map((t, idx) => (
-                  <tr key={idx} className="border-b border-gray-700/50 hover:bg-gray-700/30">
-                    <td className="py-2 font-semibold text-blue-300">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                        {t.name}
-                      </div>
-                    </td>
-                    <td className="py-2 text-sm text-gray-300">{t.desc}</td>
-                    <td className="py-2 text-sm text-gray-400">{t.schema}</td>
-                    <td className="py-2 text-sm text-gray-400">{t.latency}</td>
-                  </tr>
+                  <React.Fragment key={idx}>
+                    <tr className="border-b border-gray-700/50 hover:bg-gray-700/30">
+                      <td className="py-2 font-semibold text-blue-300">
+                        <div className="flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                          {t.name}
+                        </div>
+                      </td>
+                      <td className="py-2 text-sm text-gray-300">{t.desc}</td>
+                      <td className="py-2 text-sm text-gray-400">{t.schema}</td>
+                      <td className="py-2 text-sm text-gray-400">{t.latency}</td>
+                      <td className="py-2 text-sm">
+                        <button
+                          onClick={() => handleRunTool(t.name)}
+                          className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold py-1 px-2 rounded transition"
+                        >
+                          Run
+                        </button>
+                      </td>
+                    </tr>
+                    {activeToolResult && activeToolResult.tool === t.name && (
+                      <tr className="bg-gray-800">
+                        <td colSpan="5" className="p-4 border-b border-gray-700/50">
+                          <div className="flex justify-between mb-2">
+                            <span className="text-sm font-semibold text-gray-300">Result ({activeToolResult.latency}ms)</span>
+                            <button onClick={() => setActiveToolResult(null)} className="text-gray-500 hover:text-white text-xs">Close</button>
+                          </div>
+                          <pre className="bg-gray-900 p-3 rounded text-xs overflow-x-auto text-green-300">
+                            {JSON.stringify(activeToolResult.data, null, 2)}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

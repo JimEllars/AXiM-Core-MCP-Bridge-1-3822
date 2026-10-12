@@ -176,6 +176,41 @@ describe('AXiM Internal MCP Bridge worker', () => {
       expect(resultText.events[0].message).toContain('[REDACTED_JWT]');
     });
 
+
+    it('telemetry_lookup builds correct URL with severity and component arguments', async () => {
+      const fetchSpy = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('telemetry_events')) {
+          return Promise.resolve(new Response(JSON.stringify([{ id: 'uuid-1' }])));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+      globalThis.fetch = fetchSpy;
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake-key' };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'telemetry_lookup', arguments: { limit: 5, component: 'auth-service', severity: 'CRITICAL' } } });
+      const response = await worker.fetch(request, envWithDb, context);
+      expect(response.status).toBe(200);
+
+      const dbCalls = fetchSpy.mock.calls.filter((c: any) => c[0].includes('telemetry_events'));
+      expect(dbCalls.length).toBe(1);
+      const calledUrl = dbCalls[0][0];
+      expect(calledUrl).toContain('component_id=eq.auth-service');
+      expect(calledUrl).toContain('severity=eq.CRITICAL');
+      expect(calledUrl).toContain('limit=5');
+    });
+
+    it('recordMcpAuditLog handles missing database credentials gracefully', async () => {
+      // Mock fetch to reject if called to ensure it's not called
+      const fetchSpy = vi.fn().mockRejectedValue(new Error('Should not be called'));
+      globalThis.fetch = fetchSpy;
+
+      const { recordMcpAuditLog } = await import('../src/tools/coreObservability');
+
+      // Should not throw
+      await expect(recordMcpAuditLog(baseEnv, '/mcp', 'test_tool', 'user@test.com', 200, 50)).resolves.toBeUndefined();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     it('hitl_queue_status returns active status and pending approvals count', async () => {
       globalThis.fetch = vi.fn().mockImplementation((url: string) => {
         if (url.includes('approval_queue')) {
