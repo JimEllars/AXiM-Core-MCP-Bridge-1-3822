@@ -51,12 +51,17 @@ export async function handleTelemetryLookup(args: Record<string, unknown> | unde
   }
 
   const limit = args?.limit && typeof args.limit === 'number' ? Math.min(Math.max(args.limit, 1), 25) : 5;
-  const serviceName = args?.service_name && typeof args.service_name === 'string' ? args.service_name : null;
+  const serviceName = (args?.service_name && typeof args.service_name === 'string' ? args.service_name : null) ||
+                      (args?.component && typeof args.component === 'string' ? args.component : null);
+  const severity = args?.severity && typeof args.severity === 'string' ? args.severity : null;
 
   try {
     let url = `${env.SUPABASE_URL}/rest/v1/telemetry_events?select=id,component_id,severity,message,created_at&order=created_at.desc&limit=${limit}`;
     if (serviceName) {
       url += `&component_id=eq.${encodeURIComponent(serviceName)}`;
+    }
+    if (severity) {
+      url += `&severity=eq.${encodeURIComponent(severity)}`;
     }
 
     const res = await fetch(url, {
@@ -72,6 +77,33 @@ export async function handleTelemetryLookup(args: Record<string, unknown> | unde
     return { count: Array.isArray(data) ? data.length : 0, events: sanitizeEgressPayload(data) };
   } catch (error: any) {
     return { error: error.message || 'Failed to query telemetry events' };
+  }
+}
+
+export async function recordMcpAuditLog(
+  env: Env,
+  route: string,
+  toolName: string,
+  operatorEmail: string | undefined,
+  statusCode: number,
+  durationMs: number
+): Promise<void> {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/mcp_audit_logs`, {
+      method: 'POST',
+      headers: getSupabaseHeaders(env),
+      body: JSON.stringify({
+        route,
+        tool_name: toolName,
+        operator_email: operatorEmail || null,
+        status_code: statusCode,
+        metadata: { duration_ms: durationMs, node: 'cloudflare_edge' }
+      }),
+      signal: AbortSignal.timeout(3000)
+    });
+  } catch {
+    // Non-blocking telemetry hook; failure must not interrupt response stream
   }
 }
 

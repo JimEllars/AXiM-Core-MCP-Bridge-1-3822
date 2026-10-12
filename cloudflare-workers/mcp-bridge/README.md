@@ -1,13 +1,13 @@
 # AXiM Core MCP Bridge
 
-A stateless Cloudflare Worker MCP endpoint at `/mcp`. The current build provides local runtime and security checks; it does not expose write operations or database-backed tools.
+A stateless Cloudflare Worker MCP endpoint at `/mcp`.
 
 ## Local checks
 
 From this directory:
 
 ```sh
-npm install
+npm install --legacy-peer-deps
 npm test
 npm run typecheck
 npx wrangler deploy --dry-run
@@ -42,8 +42,10 @@ Never put credentials in client-side code, source control, or a `VITE_` variable
 
 ## Current tools
 
-- `bridge_runtime_status`: reports runtime and kill-switch state.
-- `bridge_security_check`: reports whether security controls are configured without returning credentials.
-- `sanitizer_self_test`: verifies common secret and personal-data redactions.
-
-The bridge currently has no connected database. Telemetry, ecosystem, HITL queue, and persistent audit tools are intentionally not enabled until a backend is connected and configured.
+- `bridge_runtime_status`: Worker runtime, KV state, and rate-limit tracking.
+- `bridge_security_check`: Cloudflare Access, Passport URL, and KV configuration validation.
+- `sanitizer_self_test`: Verification of secret, token, and PII egress redaction.
+- `aximDockConfig`: Generates client mcpServers configuration blocks.
+- `core_health_check`: Live Supabase Core REST connectivity and latency probe.
+- `telemetry_lookup`: Live queries to public.telemetry_events with redaction.
+- `hitl_queue_status`: Live queries to public.approval_queue for pending approvals.
