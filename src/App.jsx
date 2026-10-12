@@ -5,12 +5,20 @@ function App() {
   const [tools, setTools] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
   const [activeToolResult, setActiveToolResult] = useState(null);
-  const [bridgeSecret, setBridgeSecret] = useState('');
-  const [bridgeUrl, setBridgeUrl] = useState(window.location.hostname === 'localhost' ? 'http://localhost:8787' : window.location.origin);
-  const [clientId, setClientId] = useState('');
-  const [clientSecret, setClientSecret] = useState('');
+  const [bridgeSecret, setBridgeSecret] = useState(localStorage.getItem('bridgeSecret') || '');
+  const [bridgeUrl, setBridgeUrl] = useState(localStorage.getItem('bridgeUrl') || (window.location.hostname === 'localhost' ? 'http://localhost:8787' : window.location.origin));
+  const [clientId, setClientId] = useState(localStorage.getItem('clientId') || '');
+  const [clientSecret, setClientSecret] = useState(localStorage.getItem('clientSecret') || '');
   const [dockConfig, setDockConfig] = useState(null);
   const [healthPing, setHealthPing] = useState(null);
+  const [telemetryArgs, setTelemetryArgs] = useState({ limit: 5, component: '', severity: '' });
+
+  useEffect(() => {
+    localStorage.setItem('bridgeSecret', bridgeSecret);
+    localStorage.setItem('bridgeUrl', bridgeUrl);
+    localStorage.setItem('clientId', clientId);
+    localStorage.setItem('clientSecret', clientSecret);
+  }, [bridgeSecret, bridgeUrl, clientId, clientSecret]);
 
   useEffect(() => {
     // Initial tool list (simulate)
@@ -36,7 +44,9 @@ function App() {
     try {
       let args = {};
       if (toolName === 'telemetry_lookup') {
-        args = { limit: 2 };
+        args = { limit: telemetryArgs.limit };
+        if (telemetryArgs.component) args.component = telemetryArgs.component;
+        if (telemetryArgs.severity) args.severity = telemetryArgs.severity;
       }
 
       const payload = {
@@ -71,13 +81,18 @@ function App() {
 
       setActiveToolResult({ tool: toolName, data, latency });
 
+      // Dynamic Row Latency Update
+      setTools(prevTools => prevTools.map(t => t.name === toolName ? { ...t, latency: `${latency}ms` } : t));
+
       setAuditLog(prev => [
         { id: Date.now(), time: new Date().toLocaleTimeString(), method: toolName, status },
         ...prev
       ]);
     } catch (e) {
       const end = Date.now();
-      setActiveToolResult({ tool: toolName, data: { error: e.message }, latency: end - start });
+      const latency = end - start;
+      setActiveToolResult({ tool: toolName, data: { error: e.message }, latency });
+      setTools(prevTools => prevTools.map(t => t.name === toolName ? { ...t, latency: `${latency}ms` } : t));
       setAuditLog(prev => [
         { id: Date.now(), time: new Date().toLocaleTimeString(), method: toolName, status: 'ERROR' },
         ...prev
@@ -269,7 +284,15 @@ function App() {
                         </div>
                       </td>
                       <td className="py-2 text-sm text-gray-300">{t.desc}</td>
-                      <td className="py-2 text-sm text-gray-400">{t.schema}</td>
+                      <td className="py-2 text-sm text-gray-400">
+                        {t.name === 'telemetry_lookup' ? (
+                          <div className="flex flex-col gap-1 mt-1">
+                            <input type="number" placeholder="Limit" className="bg-gray-700 text-white p-1 text-xs rounded" value={telemetryArgs.limit} onChange={(e) => setTelemetryArgs({...telemetryArgs, limit: parseInt(e.target.value, 10)})} />
+                            <input type="text" placeholder="Component" className="bg-gray-700 text-white p-1 text-xs rounded" value={telemetryArgs.component} onChange={(e) => setTelemetryArgs({...telemetryArgs, component: e.target.value})} />
+                            <input type="text" placeholder="Severity (e.g. ERROR,CRITICAL)" className="bg-gray-700 text-white p-1 text-xs rounded" value={telemetryArgs.severity} onChange={(e) => setTelemetryArgs({...telemetryArgs, severity: e.target.value})} />
+                          </div>
+                        ) : t.schema}
+                      </td>
                       <td className="py-2 text-sm text-gray-400">{t.latency}</td>
                       <td className="py-2 text-sm">
                         <button
@@ -285,7 +308,10 @@ function App() {
                         <td colSpan="5" className="p-4 border-b border-gray-700/50">
                           <div className="flex justify-between mb-2">
                             <span className="text-sm font-semibold text-gray-300">Result ({activeToolResult.latency}ms)</span>
-                            <button onClick={() => setActiveToolResult(null)} className="text-gray-500 hover:text-white text-xs">Close</button>
+                            <div className="flex gap-2">
+                              <button onClick={() => navigator.clipboard.writeText(JSON.stringify(activeToolResult.data, null, 2))} className="text-blue-400 hover:text-blue-300 text-xs">Copy JSON</button>
+                              <button onClick={() => setActiveToolResult(null)} className="text-gray-500 hover:text-white text-xs">Close</button>
+                            </div>
                           </div>
                           <pre className="bg-gray-900 p-3 rounded text-xs overflow-x-auto text-green-300">
                             {JSON.stringify(activeToolResult.data, null, 2)}
