@@ -61,7 +61,12 @@ export async function handleTelemetryLookup(args: Record<string, unknown> | unde
       url += `&component_id=eq.${encodeURIComponent(serviceName)}`;
     }
     if (severity) {
-      url += `&severity=eq.${encodeURIComponent(severity)}`;
+      if (severity.includes(',')) {
+        const severityList = severity.split(',').map((s: string) => s.trim()).join(',');
+        url += `&severity=in.(${severityList})`;
+      } else {
+        url += `&severity=eq.${encodeURIComponent(severity.trim())}`;
+      }
     }
 
     const res = await fetch(url, {
