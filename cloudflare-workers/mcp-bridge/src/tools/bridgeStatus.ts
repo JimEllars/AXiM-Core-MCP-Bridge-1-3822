@@ -1,7 +1,7 @@
 import type {Env} from '../types';
 import {readKillSwitch} from '../killSwitch';
 
-export async function handleBridgeStatus(env: Env) {
+export async function handleBridgeStatus(env: Env, request?: Request) {
   const killSwitch = await readKillSwitch(env);
   const degraded = killSwitch.unavailable;
 
@@ -25,6 +25,7 @@ export async function handleBridgeStatus(env: Env) {
         ? 'CONFIGURED'
         : 'SUPABASE_URL_CONFIGURED_MISSING_KEY'
       : 'NOT_CONFIGURED',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    edge_node: (request as any)?.cf?.colo || 'Cloudflare_Edge'
   };
 }
