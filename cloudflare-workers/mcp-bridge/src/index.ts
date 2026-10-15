@@ -13,7 +13,11 @@ import {handleBridgeStatus} from './tools/bridgeStatus';
 import {handleSanitizerCheck} from './tools/sanitizerCheck';
 import {handleSecurityCheck} from './tools/securityCheck';
 import {handleAximDockConfig} from './tools/aximDockConfig';
+import {handleSessionStatus} from './tools/sessionStatus';
+
 import type {Env, JsonRpcRequest} from './types';
+import { createSession, getSession, touchSession, revokeSession } from './session';
+
 
 const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 256 * 1024;
@@ -83,6 +87,13 @@ const mcpTools = [
   {
     name: 'hitl_queue_status',
     description: 'Queries approval_queue for records where status = PENDING_OPERATOR_SIGNATURE.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+  }
+,
+  {
+    name: 'axim_session_status',
+    description: 'Reports active MCP session runtime, operator identity, and KV session metadata.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   }
@@ -184,6 +195,10 @@ async function callTool(name: string, args: Record<string, unknown> | undefined,
   if (name === 'core_health_check') return handleCoreHealthCheck(env);
   if (name === 'telemetry_lookup') return handleTelemetryLookup(args, env);
   if (name === 'hitl_queue_status') return handleHitlQueueStatus(env, args);
+  if (name === 'axim_session_status') {
+    const url = new URL(requestUrl);
+    return handleSessionStatus(env, url.searchParams.get('sessionId'), operatorEmail || 'operator');
+  }
   if (name === 'axim_dispatch_task') return handleDispatchTask(args, env, operatorEmail || 'operator');
   throw new Error('Unknown tool.');
 }
@@ -257,15 +272,29 @@ export default {
       sseHeaders.set('Cache-Control', 'no-cache');
       sseHeaders.set('Connection', 'keep-alive');
 
+      const sessionId = crypto.randomUUID();
+      const userAgent = request.headers.get('user-agent') || undefined;
+      const clientIp = request.headers.get('cf-connecting-ip') || undefined;
+
+      if (ctx && typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(createSession(env, sessionId, operatorEmail!, userAgent, clientIp));
+      }
+
       const stream = new ReadableStream({
         start(controller) {
-          const sessionId = crypto.randomUUID();
           const endpointEvent = `event: endpoint\ndata: ${url.origin}/message?sessionId=${sessionId}\n\n`;
           controller.enqueue(new TextEncoder().encode(endpointEvent));
         }
       });
 
       return new Response(stream, { headers: sseHeaders });
+    }
+
+    if (path === '/message' && request.method === 'POST') {
+      const msgSessionId = url.searchParams.get('sessionId');
+      if (msgSessionId && ctx && typeof ctx.waitUntil === 'function') {
+        ctx.waitUntil(touchSession(env, msgSessionId));
+      }
     }
 
     if (request.method !== 'POST') {

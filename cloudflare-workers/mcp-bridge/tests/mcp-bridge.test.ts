@@ -2,16 +2,26 @@ import {afterEach, describe, expect, it, vi} from './testHarness';
 import worker from '../src/index';
 import type {Env} from '../src/types';
 
+
+const mockKV = {
+  put: vi.fn(),
+  get: vi.fn(),
+  delete: vi.fn(),
+  list: vi.fn()
+};
+
 const baseEnv: Env = {
   ENVIRONMENT: 'test',
   PASSPORT_VERIFY_URL: 'https://passport.axim.us.com/api/v1/auth/verify-token',
   CF_ACCESS_CLIENT_ID: 'cf-client-id',
   CF_ACCESS_CLIENT_SECRET: 'cf-client-' + 'secret',
   ALLOWED_ORIGINS: 'https://core.axim.us.com',
-  DISABLE_KV_REQUIREMENT: 'true'
+  DISABLE_KV_REQUIREMENT: 'true',
+  LAB_STATE: mockKV as unknown as KVNamespace
 };
 
-const context = { waitUntil: vi.fn(() => {}) } as unknown as ExecutionContext;
+const context = { waitUntil: vi.fn((promise) => { promise.catch(() => {}); }) } as unknown as ExecutionContext;
+
 
 function makeRequest(
   body: unknown,
@@ -132,7 +142,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
 
       const json = await response.json() as any;
       const tools = json.result.tools;
-      expect(tools.length).toBe(8);
+      expect(tools.length).toBe(9);
 
       const names = tools.map((t: any) => t.name);
       expect(names).toContain('bridge_runtime_status');
