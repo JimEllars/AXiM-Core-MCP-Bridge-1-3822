@@ -1,3 +1,4 @@
+import { handleDispatchTask } from "./tools/hitlStaging";
 import {
   handleCoreHealthCheck,
   handleTelemetryLookup,
@@ -19,6 +20,21 @@ const MAX_RESPONSE_BYTES = 256 * 1024;
 const PROTOCOL_VERSION = '2024-11-05';
 
 const mcpTools = [
+  {
+    name: 'axim_dispatch_task',
+    description: 'Stages a mutating system task into public.approval_queue for mandatory operator signature. Does NOT execute directly.',
+    inputSchema: {
+      type: 'object',
+      required: ['action_type', 'target_system'],
+      properties: {
+        action_type: { type: 'string', description: 'Type of mutating action (e.g., stage_pr_merge, stage_firewall_rule, stage_code_deploy).' },
+        target_system: { type: 'string', description: 'Subsystem target (e.g., asguard, coding_lab, core).' },
+        payload: { type: 'object', description: 'Parameters for the requested action.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
+  },
   {
     name: 'bridge_runtime_status',
     description: 'Reports bridge runtime, transport, rate-limit, and kill-switch status.',
@@ -160,7 +176,7 @@ function validId(id: JsonRpcRequest['id']): boolean {
   return id === undefined || id === null || typeof id === 'string' || typeof id === 'number';
 }
 
-async function callTool(name: string, args: Record<string, unknown> | undefined, env: Env, requestUrl: string, request: Request): Promise<unknown> {
+async function callTool(name: string, args: Record<string, unknown> | undefined, env: Env, requestUrl: string, request: Request, operatorEmail: string | undefined): Promise<unknown> {
   if (name === 'bridge_runtime_status') return handleBridgeStatus(env, request);
   if (name === 'bridge_security_check') return handleSecurityCheck(env);
   if (name === 'sanitizer_self_test') return handleSanitizerCheck();
@@ -168,6 +184,7 @@ async function callTool(name: string, args: Record<string, unknown> | undefined,
   if (name === 'core_health_check') return handleCoreHealthCheck(env);
   if (name === 'telemetry_lookup') return handleTelemetryLookup(args, env);
   if (name === 'hitl_queue_status') return handleHitlQueueStatus(env, args);
+  if (name === 'axim_dispatch_task') return handleDispatchTask(args, env, operatorEmail || 'operator');
   throw new Error('Unknown tool.');
 }
 
@@ -242,7 +259,8 @@ export default {
 
       const stream = new ReadableStream({
         start(controller) {
-          const endpointEvent = `event: endpoint\ndata: ${url.origin}/message\n\n`;
+          const sessionId = crypto.randomUUID();
+          const endpointEvent = `event: endpoint\ndata: ${url.origin}/message?sessionId=${sessionId}\n\n`;
           controller.enqueue(new TextEncoder().encode(endpointEvent));
         }
       });
@@ -381,7 +399,7 @@ export default {
     const cfColo = (request as any).cf?.colo || undefined;
     let finalResponse: Response;
     try {
-      const rawResult = await callTool(toolName, args, env, request.url, request);
+      const rawResult = await callTool(toolName, args, env, request.url, request, operatorEmail);
       const sanitizedResult = sanitizeEgressPayload(rawResult);
       finalResponse = jsonResponse(rpcResult(payload.id, toolResult(sanitizedResult)), 200, request, env);
     } catch (e) {

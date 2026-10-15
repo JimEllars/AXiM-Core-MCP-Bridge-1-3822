@@ -62,27 +62,37 @@ describe('AXiM Internal MCP Bridge worker', () => {
   });
 
   describe('/sse', () => {
-    it('returns text/event-stream with endpoint pointing to /message', async () => {
-      // Mock fetch for passport verify (required since /sse is authenticated)
-      globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+    it('returns text/event-stream with endpoint pointing to /message?sessionId=', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' }))
+      );
 
       const request = new Request('https://mcp.axim.us.com/sse', {
         method: 'GET',
         headers: {
           'Authorization': 'Bearer passport-token',
           'CF-Access-Client-Id': 'cf-client-id',
-          'CF-Access-Client-Secret': 'cf-client-' + 'secret'
+          'CF-Access-Client-Secret': 'cf-client-secret'
         }
       });
+
       const response = await worker.fetch(request, baseEnv, context);
+
       expect(response.status).toBe(200);
       expect(response.headers.get('Content-Type')).toBe('text/event-stream');
 
       const reader = response.body?.getReader();
       const { value } = await reader!.read();
       const text = new TextDecoder().decode(value);
+
       expect(text).toContain('event: endpoint');
-      expect(text).toContain('https://mcp.axim.us.com/message');
+      expect(text).toContain('https://mcp.axim.us.com/message?sessionId=');
+    });
+
+    it('rejects unauthenticated /sse connections with HTTP 401', async () => {
+      const request = new Request('https://mcp.axim.us.com/sse', { method: 'GET' });
+      const response = await worker.fetch(request, baseEnv, context);
+      expect(response.status).toBe(403);
     });
   });
 
@@ -113,7 +123,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
   });
 
   describe('Tools', () => {
-    it('advertises the 7 native internal bridge tools', async () => {
+    it('advertises the 8 native internal bridge tools', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
 
       const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -122,7 +132,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
 
       const json = await response.json() as any;
       const tools = json.result.tools;
-      expect(tools.length).toBe(7);
+      expect(tools.length).toBe(8);
 
       const names = tools.map((t: any) => t.name);
       expect(names).toContain('bridge_runtime_status');
@@ -132,10 +142,43 @@ describe('AXiM Internal MCP Bridge worker', () => {
       expect(names).toContain('core_health_check');
       expect(names).toContain('telemetry_lookup');
       expect(names).toContain('hitl_queue_status');
+      expect(names).toContain('axim_dispatch_task');
     });
   });
 
   describe('Supabase Observability Tools', () => {
+    it('axim_dispatch_task stages records into approval_queue with status PENDING_OPERATOR_SIGNATURE', async () => {
+      const fetchSpy = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('approval_queue')) {
+          return Promise.resolve(new Response(JSON.stringify([{ id: 'task-uuid-99' }]), { status: 201 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+      globalThis.fetch = fetchSpy;
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake-key' };
+      const request = makeRequest({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'axim_dispatch_task',
+          arguments: {
+            action_type: 'stage_pr_merge',
+            target_system: 'coding_lab',
+            payload: { pr_id: 104 }
+          }
+        }
+      });
+
+      const response = await worker.fetch(request, envWithDb, context);
+      expect(response.status).toBe(200);
+
+      const json = await response.json() as any;
+      const result = JSON.parse(json.result?.content?.[0]?.text || '{}');
+      expect(result.status).toBe('STAGED_FOR_APPROVAL');
+      expect(result.task_id).toBe('task-uuid-99');
+    });
     it('core_health_check returns HEALTHY when HTTP 200', async () => {
       globalThis.fetch = vi.fn().mockImplementation((url: string) => {
         if (url.includes('telemetry_events')) {
