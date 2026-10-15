@@ -84,7 +84,7 @@ function corsHeaders(request: Request, env: Env): Headers {
 
   if (origin && allowedOrigins.includes(origin)) {
     headers.set('Access-Control-Allow-Origin', origin);
-    headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     headers.set(
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, X-Axim-Gateway-Token, CF-Access-Client-Id, CF-Access-Client-Secret, MCP-Protocol-Version'
@@ -160,14 +160,14 @@ function validId(id: JsonRpcRequest['id']): boolean {
   return id === undefined || id === null || typeof id === 'string' || typeof id === 'number';
 }
 
-async function callTool(name: string, args: Record<string, unknown> | undefined, env: Env, requestUrl: string): Promise<unknown> {
-  if (name === 'bridge_runtime_status') return handleBridgeStatus(env);
+async function callTool(name: string, args: Record<string, unknown> | undefined, env: Env, requestUrl: string, request: Request): Promise<unknown> {
+  if (name === 'bridge_runtime_status') return handleBridgeStatus(env, request);
   if (name === 'bridge_security_check') return handleSecurityCheck(env);
   if (name === 'sanitizer_self_test') return handleSanitizerCheck();
   if (name === 'aximDockConfig') return handleAximDockConfig(env, requestUrl);
   if (name === 'core_health_check') return handleCoreHealthCheck(env);
   if (name === 'telemetry_lookup') return handleTelemetryLookup(args, env);
-  if (name === 'hitl_queue_status') return handleHitlQueueStatus(env);
+  if (name === 'hitl_queue_status') return handleHitlQueueStatus(env, args);
   throw new Error('Unknown tool.');
 }
 
@@ -377,9 +377,11 @@ export default {
     }
 
     const callStart = Date.now();
+    const cfRay = request.headers.get('cf-ray') || undefined;
+    const cfColo = (request as any).cf?.colo || undefined;
     let finalResponse: Response;
     try {
-      const rawResult = await callTool(toolName, args, env, request.url);
+      const rawResult = await callTool(toolName, args, env, request.url, request);
       const sanitizedResult = sanitizeEgressPayload(rawResult);
       finalResponse = jsonResponse(rpcResult(payload.id, toolResult(sanitizedResult)), 200, request, env);
     } catch (e) {
@@ -394,7 +396,7 @@ export default {
 
     if (ctx && typeof ctx.waitUntil === 'function') {
       const duration = Date.now() - callStart;
-      ctx.waitUntil(recordMcpAuditLog(env, path, toolName, operatorEmail, finalResponse.status, duration));
+      ctx.waitUntil(recordMcpAuditLog(env, path, toolName, operatorEmail, finalResponse.status, duration, { cf_ray: cfRay, colo: cfColo }));
     }
 
     return finalResponse;

@@ -221,6 +221,48 @@ describe('AXiM Internal MCP Bridge worker', () => {
       expect(calledUrl).toContain('limit=5');
     });
 
+
+
+    it('hitl_queue_status respects the limit query parameter', async () => {
+      const fetchSpy = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('approval_queue')) {
+          return Promise.resolve(new Response(JSON.stringify([{ id: 'req-1' }, { id: 'req-2' }])));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+      globalThis.fetch = fetchSpy;
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake-key' };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'hitl_queue_status', arguments: { limit: 5 } } });
+      const response = await worker.fetch(request, envWithDb, context);
+      expect(response.status).toBe(200);
+
+      const dbCalls = fetchSpy.mock.calls.filter((c: any) => c[0].includes('approval_queue'));
+      expect(dbCalls.length).toBe(1);
+      const calledUrl = dbCalls[0][0];
+      expect(calledUrl).toContain('limit=5');
+    });
+
+    it('recordMcpAuditLog accepts and serializes cf_ray and colo metadata without runtime errors', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify({})));
+      globalThis.fetch = fetchSpy;
+
+      const { recordMcpAuditLog } = await import('../src/tools/coreObservability');
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake-key' };
+
+      await expect(recordMcpAuditLog(envWithDb, '/mcp', 'test_tool', 'user@test.com', 200, 50, { cf_ray: 'ray-123', colo: 'EWR' })).resolves.toBeUndefined();
+
+      expect(fetchSpy).toHaveBeenCalled();
+      const fetchCall = fetchSpy.mock.calls[0];
+      const requestInit = fetchCall[1];
+      const body = JSON.parse(requestInit.body);
+
+      expect(body.metadata.cf_ray).toBe('ray-123');
+      expect(body.metadata.colo).toBe('EWR');
+      expect(body.metadata.node).toBe('cloudflare_edge');
+    });
+
     it('recordMcpAuditLog handles missing database credentials gracefully', async () => {
       // Mock fetch to reject if called to ensure it's not called
       const fetchSpy = vi.fn().mockRejectedValue(new Error('Should not be called'));

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import SafeIcon from './common/SafeIcon.jsx';
 
 function App() {
-  const [telemetry, setTelemetry] = useState({ ping: '...', uptime: '...', status: 'Unknown', suspended: false });
+  const [telemetry, setTelemetry] = useState({ ping: '...', uptime: '...', status: 'Unknown', suspended: false,
+    colo: 'Pending' });
   const [tools, setTools] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
   const [activeToolResult, setActiveToolResult] = useState(null);
@@ -11,6 +13,8 @@ function App() {
   const [clientSecret, setClientSecret] = useState(localStorage.getItem('clientSecret') || '');
   const [dockConfig, setDockConfig] = useState(null);
   const [healthPing, setHealthPing] = useState(null);
+  const [copiedConfig, setCopiedConfig] = useState(false);
+  const [hitlArgs, setHitlArgs] = useState({ limit: 10 });
   const [telemetryArgs, setTelemetryArgs] = useState({ limit: 5, component: '', severity: '' });
 
   useEffect(() => {
@@ -43,7 +47,10 @@ function App() {
     const start = Date.now();
     try {
       let args = {};
-      if (toolName === 'telemetry_lookup') {
+      if (toolName === 'hitl_queue_status') {
+      args = hitlArgs;
+    }
+    if (toolName === 'telemetry_lookup') {
         args = { limit: telemetryArgs.limit };
         if (telemetryArgs.component) args.component = telemetryArgs.component;
         if (telemetryArgs.severity) args.severity = telemetryArgs.severity;
@@ -151,6 +158,7 @@ function App() {
              ping: `${end - start}ms`,
              uptime: '99.99%',
              status: parsed.status || 'Online',
+             colo: parsed.edge_node || 'Unknown',
              suspended: parsed.kill_switch === 'SUSPENDED'
            });
         }
@@ -166,7 +174,8 @@ function App() {
   const copyConfig = () => {
     if (dockConfig) {
       navigator.clipboard.writeText(JSON.stringify(dockConfig, null, 2));
-      alert('Config copied to clipboard');
+      setCopiedConfig(true);
+      setTimeout(() => setCopiedConfig(false), 2000);
     }
   };
 
@@ -180,6 +189,7 @@ function App() {
           <div className="space-y-2 mb-4">
             <p><span className="text-gray-400">Status:</span> <span className={telemetry.status === 'OPERATIONAL' || telemetry.status === 'Online' ? 'text-green-500' : 'text-red-500'}>{telemetry.status}</span></p>
             <p><span className="text-gray-400">Ping:</span> {telemetry.ping}</p>
+            <p><span className="text-gray-400">Edge Node:</span> {telemetry.colo}</p>
             <p><span className="text-gray-400">Uptime:</span> {telemetry.uptime}</p>
             <p><span className="text-gray-400">Endpoints:</span> <span className="text-blue-300">/mcp, /sse</span></p>
             <p><span className="text-gray-400">Kill Switch:</span> {telemetry.suspended ? <span className="text-red-500 font-bold">ENGAGED</span> : <span className="text-green-500">DISARMED</span>}</p>
@@ -251,7 +261,7 @@ function App() {
                   onClick={copyConfig}
                   className="mt-2 bg-gray-600 hover:bg-gray-500 text-white text-xs py-1 px-3 rounded"
                 >
-                  Copy JSON
+                  {copiedConfig ? 'Copied!' : 'Copy JSON'}
                 </button>
               </div>
             )}
@@ -279,13 +289,17 @@ function App() {
                     <tr className="border-b border-gray-700/50 hover:bg-gray-700/30">
                       <td className="py-2 font-semibold text-blue-300">
                         <div className="flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-green-500"></span>
+                          <SafeIcon name="Activity" className="text-green-500" />
                           {t.name}
                         </div>
                       </td>
                       <td className="py-2 text-sm text-gray-300">{t.desc}</td>
                       <td className="py-2 text-sm text-gray-400">
-                        {t.name === 'telemetry_lookup' ? (
+                        {t.name === 'hitl_queue_status' ? (
+                          <div className="flex flex-col gap-1 mt-1">
+                            <input type="number" placeholder="Limit" className="bg-gray-700 text-white p-1 text-xs rounded" value={hitlArgs.limit} onChange={(e) => setHitlArgs({...hitlArgs, limit: parseInt(e.target.value, 10)})} />
+                          </div>
+                        ) : t.name === 'telemetry_lookup' ? (
                           <div className="flex flex-col gap-1 mt-1">
                             <input type="number" placeholder="Limit" className="bg-gray-700 text-white p-1 text-xs rounded" value={telemetryArgs.limit} onChange={(e) => setTelemetryArgs({...telemetryArgs, limit: parseInt(e.target.value, 10)})} />
                             <input type="text" placeholder="Component" className="bg-gray-700 text-white p-1 text-xs rounded" value={telemetryArgs.component} onChange={(e) => setTelemetryArgs({...telemetryArgs, component: e.target.value})} />

@@ -91,7 +91,8 @@ export async function recordMcpAuditLog(
   toolName: string,
   operatorEmail: string | undefined,
   statusCode: number,
-  durationMs: number
+  durationMs: number,
+  edgeMeta?: { cf_ray?: string; colo?: string }
 ): Promise<void> {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return;
   try {
@@ -103,7 +104,12 @@ export async function recordMcpAuditLog(
         tool_name: toolName,
         operator_email: operatorEmail || null,
         status_code: statusCode,
-        metadata: { duration_ms: durationMs, node: 'cloudflare_edge' }
+        metadata: {
+          duration_ms: durationMs,
+          node: 'cloudflare_edge',
+          cf_ray: edgeMeta?.cf_ray || null,
+          colo: edgeMeta?.colo || 'local'
+        }
       }),
       signal: AbortSignal.timeout(3000)
     });
@@ -112,13 +118,14 @@ export async function recordMcpAuditLog(
   }
 }
 
-export async function handleHitlQueueStatus(env: Env) {
+export async function handleHitlQueueStatus(env: Env, args?: { limit?: number }) {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     return { error: 'Supabase credentials are not configured.' };
   }
 
   try {
-    const url = `${env.SUPABASE_URL}/rest/v1/approval_queue?select=id,action_type,target_system,created_at&status=eq.PENDING_OPERATOR_SIGNATURE`;
+    const limit = args?.limit && typeof args.limit === 'number' ? Math.min(Math.max(args.limit, 1), 50) : 10;
+    const url = `${env.SUPABASE_URL}/rest/v1/approval_queue?select=id,action_type,target_system,created_at&status=eq.PENDING_OPERATOR_SIGNATURE&limit=${limit}`;
     const res = await fetch(url, {
       headers: getSupabaseHeaders(env),
       signal: AbortSignal.timeout(4000)
