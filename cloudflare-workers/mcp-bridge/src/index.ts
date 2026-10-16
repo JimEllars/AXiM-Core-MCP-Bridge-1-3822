@@ -13,7 +13,7 @@ import {handleBridgeStatus} from './tools/bridgeStatus';
 import {handleSanitizerCheck} from './tools/sanitizerCheck';
 import {handleSecurityCheck} from './tools/securityCheck';
 import {handleAximDockConfig} from './tools/aximDockConfig';
-import {handleSessionStatus} from './tools/sessionStatus';
+import {handleSessionStatus, handleListSessions, handleRevokeSessionTool} from './tools/sessionStatus';
 
 import type {Env, JsonRpcRequest} from './types';
 import { createSession, getSession, touchSession, revokeSession } from './session';
@@ -96,6 +96,25 @@ const mcpTools = [
     description: 'Reports active MCP session runtime, operator identity, and KV session metadata.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+  },
+  {
+    name: 'axim_list_sessions',
+    description: 'Lists all currently active docked MCP sessions stored in Cloudflare KV.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+  },
+  {
+    name: 'axim_revoke_session',
+    description: 'Instantly revokes an active MCP session from Cloudflare KV by session ID.',
+    inputSchema: {
+      type: 'object',
+      required: ['target_session_id'],
+      properties: {
+        target_session_id: { type: 'string', description: 'The UUID of the session to revoke.' }
+      },
+      additionalProperties: false
+    },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
   }
 ];
 
@@ -199,6 +218,8 @@ async function callTool(name: string, args: Record<string, unknown> | undefined,
     const url = new URL(requestUrl);
     return handleSessionStatus(env, url.searchParams.get('sessionId'), operatorEmail || 'operator');
   }
+  if (name === 'axim_list_sessions') return handleListSessions(env);
+  if (name === 'axim_revoke_session') return handleRevokeSessionTool(env, String(args?.target_session_id || ''));
   if (name === 'axim_dispatch_task') return handleDispatchTask(args, env, operatorEmail || 'operator');
   throw new Error('Unknown tool.');
 }
@@ -292,8 +313,19 @@ export default {
 
     if (path === '/message' && request.method === 'POST') {
       const msgSessionId = url.searchParams.get('sessionId');
-      if (msgSessionId && ctx && typeof ctx.waitUntil === 'function') {
-        ctx.waitUntil(touchSession(env, msgSessionId));
+      if (msgSessionId) {
+        const activeSession = await getSession(env, msgSessionId);
+        if (!activeSession) {
+          return jsonResponse(
+            rpcError(null, -32001, 'MCP session has been revoked or expired.'),
+            401,
+            request,
+            env
+          );
+        }
+        if (ctx && typeof ctx.waitUntil === 'function') {
+          ctx.waitUntil(touchSession(env, msgSessionId));
+        }
       }
     }
 

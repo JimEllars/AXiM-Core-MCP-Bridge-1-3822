@@ -73,3 +73,25 @@ export async function revokeSession(env: Env, sessionId: string): Promise<boolea
     return false;
   }
 }
+
+
+export async function listActiveSessions(env: Env): Promise<McpSessionData[]> {
+  if (!env.LAB_STATE) return [];
+  try {
+    const list = await env.LAB_STATE.list({ prefix: 'mcp-session:', limit: 50 });
+    const sessions: McpSessionData[] = [];
+    for (const key of list.keys) {
+      const raw = await env.LAB_STATE.get(key.name);
+      if (raw) {
+        try {
+          sessions.push(JSON.parse(raw) as McpSessionData);
+        } catch {
+          // Ignore malformed keys
+        }
+      }
+    }
+    return sessions;
+  } catch {
+    return [];
+  }
+}

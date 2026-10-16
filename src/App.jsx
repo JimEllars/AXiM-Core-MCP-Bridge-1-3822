@@ -39,11 +39,43 @@ function App() {
 
     // Simulate audit log
 
-    // Simulate fetching active sessions
-    setActiveSessions([
-      { id: 'sim-session-1', lastActiveAt: new Date().toISOString(), userAgent: 'Claude Desktop' },
-      { id: 'sim-session-2', lastActiveAt: new Date(Date.now() - 300000).toISOString(), userAgent: 'VS Code Extension' }
-    ]);
+    // Fetch real active sessions
+    const fetchSessions = async () => {
+      try {
+        const payload = {
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'tools/call',
+          params: { name: 'axim_list_sessions', arguments: {} }
+        };
+        const response = await fetch(`${bridgeUrl}/mcp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${bridgeSecret}`
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (data.result && data.result.content && data.result.content[0] && data.result.content[0].text) {
+          const parsed = JSON.parse(data.result.content[0].text);
+          if (parsed.sessions) {
+            setActiveSessions(parsed.sessions.map(s => ({
+              id: s.sessionId,
+              lastActiveAt: s.lastActiveAt,
+              userAgent: s.userAgent
+            })));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch sessions:', err);
+      }
+    };
+    if (bridgeUrl && bridgeSecret) {
+      fetchSessions();
+      const intervalId = setInterval(fetchSessions, 10000);
+      return () => clearInterval(intervalId);
+    }
 
     setAuditLog([
       { id: 1, time: new Date().toLocaleTimeString(), method: 'tools/list', status: 'OK' },
