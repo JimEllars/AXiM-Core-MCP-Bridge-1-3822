@@ -133,7 +133,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
   });
 
   describe('Tools', () => {
-    it('advertises the 8 native internal bridge tools', async () => {
+    it('advertises the 11 native internal bridge tools', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
 
       const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -142,7 +142,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
 
       const json = await response.json() as any;
       const tools = json.result.tools;
-      expect(tools.length).toBe(9);
+      expect(tools.length).toBe(11);
 
       const names = tools.map((t: any) => t.name);
       expect(names).toContain('bridge_runtime_status');
@@ -153,6 +153,70 @@ describe('AXiM Internal MCP Bridge worker', () => {
       expect(names).toContain('telemetry_lookup');
       expect(names).toContain('hitl_queue_status');
       expect(names).toContain('axim_dispatch_task');
+    });
+  });
+
+  describe('Session Listing and Revocation', () => {
+    it('axim_list_sessions returns active sessions', async () => {
+            globalThis.fetch = vi.fn().mockImplementation(() => {
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+      const mockEnv = { ...baseEnv, LAB_STATE: {
+        list: vi.fn().mockResolvedValue({ keys: [{ name: 'mcp-session:id-1' }] }),
+        get: vi.fn().mockImplementation((key) => {
+          if (key.includes('rate-limit')) return Promise.resolve(JSON.stringify({ count: 1, resetAt: Date.now() + 3600000 }));
+          return Promise.resolve(JSON.stringify({ sessionId: 'id-1', operatorEmail: 'test@example.com' }));
+        }),
+        put: vi.fn().mockResolvedValue(undefined)
+      } as any };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'axim_list_sessions' } });
+      const response = await worker.fetch(request, mockEnv, context);
+      expect(response.status).toBe(200);
+
+      const json = await response.json() as any;
+      const resultText = JSON.parse(json.result.content[0].text);
+      expect(resultText.count).toBe(1);
+      expect(resultText.sessions[0].sessionId).toBe('id-1');
+    });
+
+    it('axim_revoke_session revokes session successfully', async () => {
+            globalThis.fetch = vi.fn().mockImplementation(() => {
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+      const mockEnv = { ...baseEnv, LAB_STATE: { delete: vi.fn().mockResolvedValue(undefined), get: vi.fn().mockResolvedValue(JSON.stringify({ count: 1, resetAt: Date.now() + 3600000 })), put: vi.fn().mockResolvedValue(undefined) } as any };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'axim_revoke_session', arguments: { target_session_id: 'id-1' } } });
+      const response = await worker.fetch(request, mockEnv, context);
+      expect(response.status).toBe(200);
+
+      const json = await response.json() as any;
+      const resultText = JSON.parse(json.result.content[0].text);
+      expect(resultText.status).toBe('REVOKED');
+      expect(mockEnv.LAB_STATE.delete).toHaveBeenCalledWith('mcp-session:id-1');
+    });
+
+    it('POST /message rejects revoked sessions with 401', async () => {
+            globalThis.fetch = vi.fn().mockImplementation(() => {
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+      const mockEnv = { ...baseEnv, LAB_STATE: { get: vi.fn().mockImplementation((key) => {
+          if (key.includes('rate-limit')) return Promise.resolve(JSON.stringify({ count: 1, resetAt: Date.now() + 3600000 }));
+          return Promise.resolve(null);
+      }), put: vi.fn().mockResolvedValue(undefined) } as any }; // Session missing
+      const request = new Request('http://localhost/message?sessionId=revoked-id', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer asdfghjkl',
+          'CF-Access-Client-Id': mockEnv.CF_ACCESS_CLIENT_ID || 'test-client',
+          'CF-Access-Client-Secret': mockEnv.CF_ACCESS_CLIENT_SECRET || 'test-secret'
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'ping' })
+      });
+      const response = await worker.fetch(request, mockEnv, context);
+      expect(response.status).toBe(401);
+      const json = await response.json() as any;
+      expect(json.error.message).toBe('MCP session has been revoked or expired.');
     });
   });
 
