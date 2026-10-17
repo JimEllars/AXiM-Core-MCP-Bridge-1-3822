@@ -145,3 +145,28 @@ export async function handleHitlQueueStatus(env: Env, args?: { limit?: number })
     return { error: error.message || 'HITL approval queue lookup failed' };
   }
 }
+
+export async function handleGetAuditLogs(env: Env, args?: { limit?: number }) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: 'Supabase credentials are not configured.' };
+  }
+
+  const limit = args?.limit && typeof args.limit === 'number' ? Math.min(Math.max(args.limit, 1), 100) : 20;
+
+  try {
+    const url = `${env.SUPABASE_URL}/rest/v1/mcp_audit_logs?select=id,route,tool_name,status_code,created_at,metadata&order=created_at.desc&limit=${limit}`;
+    const res = await fetch(url, {
+      headers: getSupabaseHeaders(env),
+      signal: AbortSignal.timeout(4000)
+    });
+
+    if (!res.ok) {
+      return { error: `Audit log query failed: HTTP ${res.status}` };
+    }
+
+    const data = await res.json();
+    return { logs: sanitizeEgressPayload(data) };
+  } catch (error: any) {
+    return { error: error.message || 'Failed to query audit logs' };
+  }
+}
