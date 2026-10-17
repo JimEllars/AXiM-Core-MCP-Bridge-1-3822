@@ -15,7 +15,7 @@ npx wrangler deploy --dry-run
 
 ## Production configuration
 
-1. Configure `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` as Wrangler secrets.
+1. Configure the `CF-Access-Client-Id` and `CF-Access-Client-Secret` Wrangler secrets. The underscore names `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` are still accepted as a fallback.
 2. `LAB_STATE` is bound to the dedicated `AXIM_CORE_MCP_STATE` namespace. Do not remove this binding: production fails closed when the kill-switch state is unavailable.
 3. Keep the `OPERATOR_DOCK_SUSPENDED` value unset or `false` for normal operation. Set it to `true` to activate the emergency kill switch.
 4. Deploy with `npm run deploy`.
