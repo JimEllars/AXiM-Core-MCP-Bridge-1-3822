@@ -71,16 +71,52 @@ function App() {
         console.error('Failed to fetch sessions:', err);
       }
     };
+
+    const fetchAuditLogs = async () => {
+      try {
+        const payload = {
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'tools/call',
+          params: { name: 'axim_get_audit_logs', arguments: { limit: 15 } }
+        };
+        const response = await fetch(`${bridgeUrl}/mcp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${bridgeSecret}`
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (data.result && data.result.content && data.result.content[0] && data.result.content[0].text) {
+          const parsed = JSON.parse(data.result.content[0].text);
+          if (parsed.logs) {
+            setAuditLog(parsed.logs.map(log => ({
+              id: log.id,
+              time: new Date(log.created_at).toLocaleTimeString(),
+              method: log.tool_name || log.route,
+              status: log.status_code === 200 ? 'OK' : String(log.status_code),
+              duration_ms: log.metadata?.duration_ms
+            })));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch audit logs:', err);
+      }
+    };
+
     if (bridgeUrl && bridgeSecret) {
       fetchSessions();
-      const intervalId = setInterval(fetchSessions, 10000);
+      fetchAuditLogs();
+      const intervalId = setInterval(() => {
+        fetchSessions();
+        fetchAuditLogs();
+      }, 10000);
       return () => clearInterval(intervalId);
     }
 
-    setAuditLog([
-      { id: 1, time: new Date().toLocaleTimeString(), method: 'tools/list', status: 'OK' },
-      { id: 2, time: new Date().toLocaleTimeString(), method: 'tools/call', status: 'Rate Limited' }
-    ]);
+
   }, []);
 
 
@@ -457,7 +493,7 @@ function App() {
             {auditLog.map(log => (
               <div key={log.id} className="p-2 bg-gray-900 rounded border border-gray-700 flex justify-between items-center">
                 <span className="text-gray-500">{log.time}</span>
-                <span className="text-blue-400 font-semibold">{log.method}</span>
+                <span className="text-blue-400 font-semibold">{log.method} {log.duration_ms ? `(${log.duration_ms}ms)` : ''}</span>
                 <span className={log.status === 'OK' ? 'text-green-500' : 'text-yellow-500'}>{log.status}</span>
               </div>
             ))}

@@ -3,6 +3,7 @@ import {
   handleCoreHealthCheck,
   handleTelemetryLookup,
   handleHitlQueueStatus,
+  handleGetAuditLogs,
   recordMcpAuditLog
 } from './tools/coreObservability';
 import {authenticateOperator} from './auth';
@@ -23,101 +24,7 @@ const MAX_REQUEST_BYTES = 64 * 1024;
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const PROTOCOL_VERSION = '2024-11-05';
 
-const mcpTools = [
-  {
-    name: 'axim_dispatch_task',
-    description: 'Stages a mutating system task into public.approval_queue for mandatory operator signature. Does NOT execute directly.',
-    inputSchema: {
-      type: 'object',
-      required: ['action_type', 'target_system'],
-      properties: {
-        action_type: { type: 'string', description: 'Type of mutating action (e.g., stage_pr_merge, stage_firewall_rule, stage_code_deploy).' },
-        target_system: { type: 'string', description: 'Subsystem target (e.g., asguard, coding_lab, core).' },
-        payload: { type: 'object', description: 'Parameters for the requested action.' }
-      },
-      additionalProperties: false
-    },
-    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
-  },
-  {
-    name: 'bridge_runtime_status',
-    description: 'Reports bridge runtime, transport, rate-limit, and kill-switch status.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'bridge_security_check',
-    description: 'Checks whether required access controls and KV state are configured; never returns credentials.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'sanitizer_self_test',
-    description: 'Tests egress redaction against representative credentials and personal data.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'aximDockConfig',
-    description: 'Returns the ready-to-use client JSON snippet for Claude Desktop or Cursor to dock into this bridge.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'core_health_check',
-    description: 'Pings Supabase Core and reports database latency and health.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'telemetry_lookup',
-    description: 'Queries recent critical/error telemetry events from public.telemetry_events.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Maximum events to return (default 5, max 25).' },
-        service_name: { type: 'string', description: 'Filter by service or component name.' },
-        component: { type: 'string', description: 'Alias for service_name filter.' },
-        severity: { type: 'string', description: 'Filter by severity level (e.g. ERROR, CRITICAL, WARN).' }
-      },
-      additionalProperties: false
-    },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'hitl_queue_status',
-    description: 'Queries approval_queue for records where status = PENDING_OPERATOR_SIGNATURE.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  }
-,
-  {
-    name: 'axim_session_status',
-    description: 'Reports active MCP session runtime, operator identity, and KV session metadata.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'axim_list_sessions',
-    description: 'Lists all currently active docked MCP sessions stored in Cloudflare KV.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
-  },
-  {
-    name: 'axim_revoke_session',
-    description: 'Instantly revokes an active MCP session from Cloudflare KV by session ID.',
-    inputSchema: {
-      type: 'object',
-      required: ['target_session_id'],
-      properties: {
-        target_session_id: { type: 'string', description: 'The UUID of the session to revoke.' }
-      },
-      additionalProperties: false
-    },
-    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false }
-  }
-];
-
+import { mcpTools } from "./tools/manifest";
 
 
 function corsHeaders(request: Request, env: Env): Headers {
@@ -221,6 +128,7 @@ async function callTool(name: string, args: Record<string, unknown> | undefined,
   if (name === 'axim_list_sessions') return handleListSessions(env);
   if (name === 'axim_revoke_session') return handleRevokeSessionTool(env, String(args?.target_session_id || ''));
   if (name === 'axim_dispatch_task') return handleDispatchTask(args, env, operatorEmail || 'operator');
+  if (name === 'axim_get_audit_logs') return handleGetAuditLogs(env, args);
   throw new Error('Unknown tool.');
 }
 
@@ -436,6 +344,7 @@ export default {
       );
     }
 
+    let rateLimitInfo = null;
     if ((path === '/mcp' || path === '/message') && operatorEmail) {
       const rate = await enforceRateLimit(env, operatorEmail);
       if (!rate.allowed) {
@@ -453,23 +362,32 @@ export default {
           {'Retry-After': String(retryAfter)}
         );
       }
+      rateLimitInfo = rate;
     }
 
     const callStart = Date.now();
     const cfRay = request.headers.get('cf-ray') || undefined;
     const cfColo = (request as any).cf?.colo || undefined;
     let finalResponse: Response;
+    const extraHeaders: Record<string, string> = {};
+    if (rateLimitInfo) {
+      extraHeaders['X-RateLimit-Limit'] = env.RATE_LIMIT_PER_HOUR || '60';
+      extraHeaders['X-RateLimit-Remaining'] = String(rateLimitInfo.remaining);
+      extraHeaders['X-RateLimit-Reset'] = String(rateLimitInfo.resetAt);
+    }
+
     try {
       const rawResult = await callTool(toolName, args, env, request.url, request, operatorEmail);
       const sanitizedResult = sanitizeEgressPayload(rawResult);
-      finalResponse = jsonResponse(rpcResult(payload.id, toolResult(sanitizedResult)), 200, request, env);
+      finalResponse = jsonResponse(rpcResult(payload.id, toolResult(sanitizedResult)), 200, request, env, extraHeaders);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Tool execution failed.';
       finalResponse = jsonResponse(
         rpcError(payload.id, -32602, msg),
         200,
         request,
-        env
+        env,
+        extraHeaders
       );
     }
 

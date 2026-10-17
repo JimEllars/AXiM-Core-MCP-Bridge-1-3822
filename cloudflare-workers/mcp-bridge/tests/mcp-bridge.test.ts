@@ -133,7 +133,18 @@ describe('AXiM Internal MCP Bridge worker', () => {
   });
 
   describe('Tools', () => {
-    it('advertises the 11 native internal bridge tools', async () => {
+    it('returns X-RateLimit headers on successful authenticated tool calls', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'bridge_runtime_status' } });
+      const response = await worker.fetch(request, baseEnv, context);
+
+      expect(response.status).toBe(200);
+      expect(response.headers.get('X-RateLimit-Limit')).toBeDefined();
+      expect(response.headers.get('X-RateLimit-Remaining')).toBeDefined();
+      expect(response.headers.get('X-RateLimit-Reset')).toBeDefined();
+    });
+    it('advertises the 12 native internal bridge tools', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
 
       const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -142,7 +153,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
 
       const json = await response.json() as any;
       const tools = json.result.tools;
-      expect(tools.length).toBe(11);
+      expect(tools.length).toBe(12);
 
       const names = tools.map((t: any) => t.name);
       expect(names).toContain('bridge_runtime_status');
@@ -153,6 +164,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
       expect(names).toContain('telemetry_lookup');
       expect(names).toContain('hitl_queue_status');
       expect(names).toContain('axim_dispatch_task');
+      expect(names).toContain('axim_get_audit_logs');
     });
   });
 
