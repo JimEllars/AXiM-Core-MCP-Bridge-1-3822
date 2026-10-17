@@ -59,7 +59,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
       const response = await worker.fetch(request, baseEnv, context);
       expect(response.status).toBe(200);
       const json = await response.json() as any;
-      expect(json.mcpServers['axim-core-internal'].url).toBe('https://mcp.axim.us.com/sse');
+      expect(json.mcpServers['axim-core-internal'].url).toBe('https://mcp.axim.us.com/mcp');
     });
 
     it('fails when CF headers are missing', async () => {
