@@ -221,7 +221,10 @@ export default {
 
     if (path === '/message' && request.method === 'POST') {
       const msgSessionId = url.searchParams.get('sessionId');
-      if (msgSessionId) {
+      if (!msgSessionId) {
+        return jsonResponse(rpcError(null, -32001, 'sessionId is required.'), 400, request, env);
+      }
+      {
         const activeSession = await getSession(env, msgSessionId);
         if (!activeSession) {
           return jsonResponse(
