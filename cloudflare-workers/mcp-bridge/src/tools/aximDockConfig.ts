@@ -1,4 +1,4 @@
-import { Env } from '../types';
+﻿import { Env } from '../types';
 
 export const aximDockConfigSchema = {
   name: 'aximDockConfig',
@@ -16,7 +16,8 @@ export function handleAximDockConfig(env: Env, requestUrl: string) {
   return {
     mcpServers: {
       "axim-core-internal": {
-        url: `${origin}/sse`,
+        type: "streamable-http",
+        url: `${origin}/mcp`,
         headers: {
           "CF-Access-Client-Id": "<YOUR_CF_ACCESS_CLIENT_ID>",
           "CF-Access-Client-Secret": "<YOUR_CF_ACCESS_CLIENT_SECRET>",
@@ -24,6 +25,6 @@ export function handleAximDockConfig(env: Env, requestUrl: string) {
         }
       }
     },
-    instructions: "Paste this JSON into your claude_desktop_config.json under 'mcpServers' to dock directly into AXiM Core."
+    instructions: "Use the streamable-http /mcp endpoint (e.g. mcpo --config config.json). Replace the placeholders with the Cloudflare Access service token and a Passport operator bearer token."
   };
 }

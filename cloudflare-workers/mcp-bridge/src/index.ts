@@ -292,7 +292,7 @@ export default {
       return jsonResponse(
         rpcResult(payload.id, {
           protocolVersion: PROTOCOL_VERSION,
-          capabilities: {tools: {listChanged: false}, resources: {}},
+          capabilities: {tools: {listChanged: false}},
           serverInfo: {name: 'axim-core-bridge', version: '1.0.0'}
         }),
         200,

@@ -30,7 +30,7 @@ npm run deploy
 
 `SUPABASE_SERVICE_ROLE_KEY` is also required to activate the Core health, telemetry, and HITL tools. The bridge otherwise remains available, but those three tools report that their backend is not configured.
 
-After deployment, use the Worker URL's `/sse` endpoint as the MCP server URL. The authenticated `/dock/config` endpoint returns a ready-to-use client configuration using that same origin.
+After deployment, use the Worker URL's `/mcp` endpoint (streamable HTTP) as the MCP server URL. The legacy `/sse` endpoint only announces a session; tool responses are returned on the POST, so legacy SSE-only clients (which expect replies on the stream) will not work. The authenticated `/dock/config` endpoint returns a ready-to-use client configuration using that same origin.
 
 The worker fails closed in production when its KV kill-switch binding is unavailable. KV-based hourly rate limiting is best-effort because KV read/write increments are not atomic.
 
@@ -40,6 +40,7 @@ The worker fails closed in production when its KV kill-switch binding is unavail
 - `POST /message` now requires `sessionId`, so session revocation can no longer be bypassed by omitting it.
 - The MCPO connector app is not in this repository, so it was not reviewed. Add its source or config to wire it in.
 - `STRIPE_SECRET_KEY` and `EMAILIT_API_KEY` are declared in `Env` but unused by any tool.
+- MCPO/Claude: point at `/mcp` with `type: streamable-http` and send `CF-Access-Client-Id`, `CF-Access-Client-Secret` and `Authorization: Bearer <Passport token>` headers.
 - Still to do: set `SUPABASE_SERVICE_ROLE_KEY` and the Cloudflare Access secrets with `wrangler secret put`, then run `npm run deploy`.
 - Rate limiting is best-effort because KV increments are not atomic. Consider a Durable Object for strict limits.
 
