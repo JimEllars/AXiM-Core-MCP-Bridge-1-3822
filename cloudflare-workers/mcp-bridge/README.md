@@ -34,6 +34,15 @@ After deployment, use the Worker URL's `/sse` endpoint as the MCP server URL. Th
 
 The worker fails closed in production when its KV kill-switch binding is unavailable. KV-based hourly rate limiting is best-effort because KV read/write increments are not atomic.
 
+## Readiness notes
+
+- Verified: worker tests (23), typecheck, frontend lint and build all pass.
+- `POST /message` now requires `sessionId`, so session revocation can no longer be bypassed by omitting it.
+- The MCPO connector app is not in this repository, so it was not reviewed. Add its source or config to wire it in.
+- `STRIPE_SECRET_KEY` and `EMAILIT_API_KEY` are declared in `Env` but unused by any tool.
+- Still to do: set `SUPABASE_SERVICE_ROLE_KEY` and the Cloudflare Access secrets with `wrangler secret put`, then run `npm run deploy`.
+- Rate limiting is best-effort because KV increments are not atomic. Consider a Durable Object for strict limits.
+
 ## Authentication
 
 Requests require matching Cloudflare Access service-token headers and an active Passport bearer session belonging to an authorized operator. Configure the Cloudflare credentials as Worker secrets; the Passport verification URL is a non-secret variable in `wrangler.toml`.
