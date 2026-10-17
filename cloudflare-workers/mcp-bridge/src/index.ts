@@ -6,7 +6,7 @@ import {
   handleGetAuditLogs,
   recordMcpAuditLog
 } from './tools/coreObservability';
-import {authenticateOperator} from './auth';
+import {authenticateOperator, getAccessCredentials} from './auth';
 import {readKillSwitch} from './killSwitch';
 import {enforceRateLimit} from './rateLimit';
 import {sanitizeEgressPayload} from './sanitizer';
@@ -187,7 +187,8 @@ export default {
     if (path === '/dock/config' && request.method === 'GET') {
       const clientId = request.headers.get('CF-Access-Client-Id');
       const clientSecret = request.headers.get('CF-Access-Client-Secret');
-      if (!env.CF_ACCESS_CLIENT_ID || !env.CF_ACCESS_CLIENT_SECRET || clientId !== env.CF_ACCESS_CLIENT_ID || clientSecret !== env.CF_ACCESS_CLIENT_SECRET) {
+      const creds = getAccessCredentials(env);
+      if (!creds.id || !creds.secret || clientId !== creds.id || clientSecret !== creds.secret) {
         return jsonResponse(rpcError(null, -32001, 'Cloudflare Zero Trust verification failed.'), 403, request, env);
       }
       const config = handleAximDockConfig(env, request.url);
