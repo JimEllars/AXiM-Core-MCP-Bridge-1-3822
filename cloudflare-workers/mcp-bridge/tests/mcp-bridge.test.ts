@@ -144,7 +144,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
       expect(response.headers.get('X-RateLimit-Remaining')).toBeDefined();
       expect(response.headers.get('X-RateLimit-Reset')).toBeDefined();
     });
-    it('advertises the 12 native internal bridge tools', async () => {
+    it('advertises the 13 native internal bridge tools', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
 
       const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
@@ -153,7 +153,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
 
       const json = await response.json() as any;
       const tools = json.result.tools;
-      expect(tools.length).toBe(12);
+      expect(tools.length).toBe(13);
 
       const names = tools.map((t: any) => t.name);
       expect(names).toContain('bridge_runtime_status');
@@ -233,6 +233,28 @@ describe('AXiM Internal MCP Bridge worker', () => {
   });
 
   describe('Supabase Observability Tools', () => {
+    it('axim_ecosystem_status returns connected nodes from Supabase', async () => {
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes('ecosystem_nodes')) {
+          return Promise.resolve(new Response(JSON.stringify([
+            { node_id: '123', name: 'asguard', role: 'Security', status: 'ONLINE', last_heartbeat: '2023-01-01T00:00:00Z' }
+          ])));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' })));
+      });
+
+      const envWithDb = { ...baseEnv, SUPABASE_URL: 'https://db.local', SUPABASE_SERVICE_ROLE_KEY: 'fake' + '-' + 'key' };
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'axim_ecosystem_status' } });
+      const response = await worker.fetch(request, envWithDb, context);
+      expect(response.status).toBe(200);
+
+      const json = await response.json() as any;
+      const resultText = JSON.parse(json.result.content[0].text);
+      expect(resultText.nodes).toBeDefined();
+      expect(resultText.nodes[0].name).toBe('asguard');
+      expect(resultText.nodes[0].status).toBe('ONLINE');
+    });
+
     it('axim_dispatch_task stages records into approval_queue with status PENDING_OPERATOR_SIGNATURE', async () => {
       const fetchSpy = vi.fn().mockImplementation((url: string) => {
         if (url.includes('approval_queue')) {
