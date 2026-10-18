@@ -100,4 +100,11 @@ export const mcpTools = [
     },
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
   }
+  ,
+  {
+    name: 'axim_ecosystem_status',
+    description: 'Lists all connected AXiM satellite apps and their operational heartbeat states.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }
+  }
 ];

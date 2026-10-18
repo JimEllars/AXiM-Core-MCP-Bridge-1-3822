@@ -4,6 +4,7 @@ import {
   handleTelemetryLookup,
   handleHitlQueueStatus,
   handleGetAuditLogs,
+  handleEcosystemStatus,
   recordMcpAuditLog
 } from './tools/coreObservability';
 import {authenticateOperator} from './auth';
@@ -129,6 +130,7 @@ async function callTool(name: string, args: Record<string, unknown> | undefined,
   if (name === 'axim_revoke_session') return handleRevokeSessionTool(env, String(args?.target_session_id || ''));
   if (name === 'axim_dispatch_task') return handleDispatchTask(args, env, operatorEmail || 'operator');
   if (name === 'axim_get_audit_logs') return handleGetAuditLogs(env, args);
+  if (name === 'axim_ecosystem_status') return handleEcosystemStatus(env);
   throw new Error('Unknown tool.');
 }
 

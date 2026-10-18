@@ -17,6 +17,8 @@ function App() {
   const [hitlArgs, setHitlArgs] = useState({ limit: 10 });
   const [telemetryArgs, setTelemetryArgs] = useState({ limit: 5, component: '', severity: '' });
   const [activeSessions, setActiveSessions] = useState([]);
+  const [rateLimit, setRateLimit] = useState(null);
+  const [nodes, setNodes] = useState([]);
 
   useEffect(() => {
     localStorage.setItem('bridgeSecret', bridgeSecret);
@@ -72,6 +74,41 @@ function App() {
       }
     };
 
+
+    const fetchNodes = async () => {
+      try {
+        const payload = {
+          jsonrpc: '2.0',
+          id: Date.now(),
+          method: 'tools/call',
+          params: { name: 'axim_ecosystem_status', arguments: {} }
+        };
+        const response = await fetch(`${bridgeUrl}/mcp`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${bridgeSecret}`
+          },
+          body: JSON.stringify(payload)
+        });
+
+        const remaining = response.headers.get('X-RateLimit-Remaining');
+        if (remaining) {
+          setRateLimit(remaining);
+        }
+
+        const data = await response.json();
+        if (data.result && data.result.content && data.result.content[0] && data.result.content[0].text) {
+          const parsed = JSON.parse(data.result.content[0].text);
+          if (parsed.nodes) {
+            setNodes(parsed.nodes);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch nodes:', err);
+      }
+    };
+
     const fetchAuditLogs = async () => {
       try {
         const payload = {
@@ -109,6 +146,8 @@ function App() {
     if (bridgeUrl && bridgeSecret) {
       fetchSessions();
       fetchAuditLogs();
+        fetchNodes();
+      fetchNodes();
       const intervalId = setInterval(() => {
         fetchSessions();
         fetchAuditLogs();
@@ -185,6 +224,8 @@ function App() {
         },
         body: JSON.stringify(payload)
       });
+      const remaining = res.headers.get('X-RateLimit-Remaining');
+      if (remaining) setRateLimit(remaining);
       const end = Date.now();
       const latency = end - start;
       const status = res.ok ? 'OK' : `HTTP_${res.status}`;
@@ -256,6 +297,8 @@ function App() {
         },
         body: JSON.stringify(payload)
       });
+      const remaining = res.headers.get('X-RateLimit-Remaining');
+      if (remaining) setRateLimit(remaining);
       const end = Date.now();
       if (res.ok) {
         setHealthPing(`${end - start}ms latency`);
@@ -301,6 +344,7 @@ function App() {
             <p><span className="text-gray-400">Uptime:</span> {telemetry.uptime}</p>
             <p><span className="text-gray-400">Endpoints:</span> <span className="text-blue-300">/mcp, /sse</span></p>
             <p><span className="text-gray-400">Kill Switch:</span> {telemetry.suspended ? <span className="text-red-500 font-bold">ENGAGED</span> : <span className="text-green-500">DISARMED</span>}</p>
+            <p><span className="text-gray-400">Token Budget:</span> {rateLimit !== null ? `${rateLimit} calls remaining` : 'Tracking...'}</p>
           </div>
           <button
             onClick={handleHealthProbe}
@@ -373,6 +417,39 @@ function App() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      </div>
+
+
+      <div className="grid grid-cols-1 gap-8 mb-8">
+        <div className="bg-gray-800 p-6 rounded-lg shadow-lg border border-gray-700 lg:col-span-3">
+          <h2 className="text-xl font-semibold mb-4 text-emerald-400">Ecosystem Nodes</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-gray-700 text-gray-400">
+                  <th className="py-2">Node Name</th>
+                  <th className="py-2">Role</th>
+                  <th className="py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nodes.length > 0 ? nodes.map((node, idx) => (
+                  <tr key={idx} className="border-b border-gray-700/50">
+                    <td className="py-2 font-mono text-xs">{node.name}</td>
+                    <td className="py-2 text-gray-400">{node.role}</td>
+                    <td className="py-2">
+                      <span className={`px-2 py-1 rounded text-xs ${node.status === 'ONLINE' ? 'bg-green-900 text-green-100' : 'bg-red-900 text-red-100'}`}>
+                        {node.status}
+                      </span>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr><td colSpan="3" className="py-4 text-center text-gray-500">No active nodes found.</td></tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       </div>

@@ -42,3 +42,18 @@ CREATE POLICY "Service role full access to telemetry_events" ON public.telemetry
 
 CREATE POLICY "Service role full access to approval_queue" ON public.approval_queue
   FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+-- Table: public.ecosystem_nodes
+CREATE TABLE IF NOT EXISTS public.ecosystem_nodes (
+  node_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'ONLINE',
+  last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE public.ecosystem_nodes ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Service role full access to ecosystem_nodes" ON public.ecosystem_nodes
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
