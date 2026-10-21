@@ -6,12 +6,9 @@ export interface Env {
   CF_ACCESS_CLIENT_SECRET?: string;
   RATE_LIMIT_PER_HOUR?: string;
   LAB_STATE?: KVNamespace;
-  DISABLE_KV_REQUIREMENT?: string;
 
   SUPABASE_URL?: string;
   SUPABASE_SERVICE_ROLE_KEY?: string;
-  STRIPE_SECRET_KEY?: string;
-  EMAILIT_API_KEY?: string;
 }
 
 export interface JsonRpcRequest {
