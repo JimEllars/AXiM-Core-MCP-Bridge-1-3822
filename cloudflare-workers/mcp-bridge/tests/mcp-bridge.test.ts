@@ -16,7 +16,6 @@ const baseEnv: Env = {
   CF_ACCESS_CLIENT_ID: 'cf-client-id',
   CF_ACCESS_CLIENT_SECRET: 'cf-client-' + 'secret',
   ALLOWED_ORIGINS: 'https://core.axim.us.com',
-  DISABLE_KV_REQUIREMENT: 'true',
   LAB_STATE: mockKV as unknown as KVNamespace
 };
 
