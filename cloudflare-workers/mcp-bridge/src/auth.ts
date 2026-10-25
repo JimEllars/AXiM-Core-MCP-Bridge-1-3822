@@ -8,6 +8,15 @@ export const AUTHORIZED_OPERATORS = new Set([
 const MAX_PASSPORT_RESPONSE_BYTES = 8 * 1024;
 const PASSPORT_TIMEOUT_MS = 5_000;
 
+// Secrets are stored under hyphenated names; underscore names remain as a fallback.
+export function getAccessCredentials(env: Env): {id?: string; secret?: string} {
+  const bag = env as unknown as Record<string, string | undefined>;
+  return {
+    id: bag['CF-Access-Client-Id'] || env.CF_ACCESS_CLIENT_ID,
+    secret: bag['CF-Access-Client-Secret'] || env.CF_ACCESS_CLIENT_SECRET
+  };
+}
+
 function reject(error: string, statusCode: number): AuthResult {
   return {authenticated: false, error, statusCode};
 }
@@ -27,7 +36,8 @@ export async function authenticateOperator(
   request: Request,
   env: Env
 ): Promise<AuthResult> {
-  if (!env.CF_ACCESS_CLIENT_ID || !env.CF_ACCESS_CLIENT_SECRET) {
+  const creds = getAccessCredentials(env);
+  if (!creds.id || !creds.secret) {
     return reject('Cloudflare Access credentials are not configured.', 503);
   }
 
@@ -38,7 +48,7 @@ export async function authenticateOperator(
   const clientId = request.headers.get('CF-Access-Client-Id');
   const clientSecret = request.headers.get('CF-Access-Client-Secret');
 
-  if (clientId !== env.CF_ACCESS_CLIENT_ID || clientSecret !== env.CF_ACCESS_CLIENT_SECRET) {
+  if (clientId !== creds.id || clientSecret !== creds.secret) {
     return reject('Cloudflare Zero Trust verification failed.', 403);
   }
 

@@ -1,11 +1,12 @@
 import type {Env} from '../types';
 import {readKillSwitch} from '../killSwitch';
+import {getAccessCredentials} from '../auth';
 
 export async function handleSecurityCheck(env: Env) {
   const killSwitch = await readKillSwitch(env);
 
   return {
-    cloudflare_access_credentials: env.CF_ACCESS_CLIENT_ID && env.CF_ACCESS_CLIENT_SECRET
+    cloudflare_access_credentials:     getAccessCredentials(env).id && getAccessCredentials(env).secret
       ? 'CONFIGURED'
       : 'MISSING',
     passport_verification_url: env.PASSPORT_VERIFY_URL ? 'CONFIGURED' : 'MISSING',
