@@ -4,6 +4,8 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   CF_ACCESS_CLIENT_ID?: string;
   CF_ACCESS_CLIENT_SECRET?: string;
+  AXIM_GATEWAY_TOKEN?: string;
+  MCP_GATEWAY_SECRET?: string;
   RATE_LIMIT_PER_HOUR?: string;
   LAB_STATE?: KVNamespace;
 
