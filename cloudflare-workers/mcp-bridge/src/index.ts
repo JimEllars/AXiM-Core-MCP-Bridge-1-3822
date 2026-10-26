@@ -158,7 +158,22 @@ export default {
       return new Response(null, {status: 204, headers});
     }
 
-    if (path !== '/sse' && path !== '/message' && path !== '/mcp' && path !== '/dock/config') {
+    if ((path === '/' || path === '/mcp') && request.method === 'GET') {
+      return jsonResponse({
+        name: "axim-core-mcp",
+        version: "1.0.0",
+        protocolVersion: PROTOCOL_VERSION,
+        status: "operational",
+        transports: ["sse", "post"],
+        endpoints: {
+          sse: "/sse",
+          message: "/message",
+          post: "/mcp"
+        }
+      }, 200, request, env);
+    }
+
+    if (path !== '/' && path !== '/sse' && path !== '/message' && path !== '/mcp' && path !== '/dock/config') {
       return jsonResponse(rpcError(null, -32601, 'MCP endpoint not found.'), 404, request, env);
     }
 
@@ -172,7 +187,7 @@ export default {
 
     let operatorEmail: string | undefined;
 
-    if (path === '/mcp' || path === '/sse' || path === '/message') {
+    if (path === '/mcp' || path === '/message') {
       const auth = await authenticateOperator(request, env);
       if (!auth.authenticated || !auth.operatorEmail) {
         return jsonResponse(
@@ -208,7 +223,7 @@ export default {
       const clientIp = request.headers.get('cf-connecting-ip') || undefined;
 
       if (ctx && typeof ctx.waitUntil === 'function') {
-        ctx.waitUntil(createSession(env, sessionId, operatorEmail!, userAgent, clientIp));
+        ctx.waitUntil(createSession(env, sessionId, operatorEmail || 'anonymous', userAgent, clientIp));
       }
 
       const stream = new ReadableStream({

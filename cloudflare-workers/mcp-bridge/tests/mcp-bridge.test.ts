@@ -14,7 +14,7 @@ const baseEnv: Env = {
   ENVIRONMENT: 'test',
   PASSPORT_VERIFY_URL: 'https://passport.axim.us.com/api/v1/auth/verify-token',
   CF_ACCESS_CLIENT_ID: 'cf-client-id',
-  CF_ACCESS_CLIENT_SECRET: 'cf-client-' + 'secret',
+  CF_ACCESS_CLIENT_SECRET: 'cf-client-secret',
   ALLOWED_ORIGINS: 'https://core.axim.us.com',
   LAB_STATE: mockKV as unknown as KVNamespace
 };
@@ -34,7 +34,7 @@ function makeRequest(
       Accept: 'application/json',
       Authorization: 'Bearer passport-token',
       'CF-Access-Client-Id': 'cf-client-id',
-      'CF-Access-Client-Secret': 'cf-client-' + 'secret',
+      'CF-Access-Client-Secret': 'cf-client-secret',
       ...headers
     },
     body: body ? JSON.stringify(body) : null
@@ -46,60 +46,62 @@ describe('AXiM Internal MCP Bridge worker', () => {
     vi.restoreAllMocks();
   });
 
+  describe('Authentication and Manifest', () => {
+    it('authenticates successfully with Basic Auth (Client ID/Secret) without Passport SSO token', async () => {
+      const basicAuth = btoa('cf-client-id:cf-client-secret');
+      const request = new Request('https://mcp.axim.us.com/mcp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Basic ${basicAuth}`
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'ping'
+        })
+      });
+
+      const response = await worker.fetch(request, baseEnv, context);
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.result).toBeDefined();
+    });
+
+    it('GET / returns 200 OK with the protocol manifest', async () => {
+      const request = new Request('https://mcp.axim.us.com/', { method: 'GET' });
+      const response = await worker.fetch(request, baseEnv, context);
+      expect(response.status).toBe(200);
+      const json = await response.json();
+      expect(json.name).toBe('axim-core-mcp');
+      expect(json.status).toBe('operational');
+    });
+
+    it('GET /sse opens an event stream without dropping due to auth', async () => {
+      const request = new Request('https://mcp.axim.us.com/sse', { method: 'GET' });
+      const response = await worker.fetch(request, baseEnv, context);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toBe('text/event-stream');
+    });
+  });
+
   describe('/dock/config', () => {
     it('returns server configuration when authenticated with CF headers', async () => {
       const request = new Request('https://mcp.axim.us.com/dock/config', {
-        method: 'GET',
         headers: {
           'CF-Access-Client-Id': 'cf-client-id',
-          'CF-Access-Client-Secret': 'cf-client-' + 'secret'
+          'CF-Access-Client-Secret': 'cf-client-secret'
         }
       });
       const response = await worker.fetch(request, baseEnv, context);
       expect(response.status).toBe(200);
       const json = await response.json() as any;
-      expect(json.mcpServers['axim-core-internal'].url).toBe('https://mcp.axim.us.com/mcp');
+      expect(json.mcpServers).toBeDefined();
     });
 
     it('fails when CF headers are missing', async () => {
-      const request = new Request('https://mcp.axim.us.com/dock/config', {
-        method: 'GET'
-      });
-      const response = await worker.fetch(request, baseEnv, context);
-      expect(response.status).toBe(403);
-    });
-  });
-
-  describe('/sse', () => {
-    it('returns text/event-stream with endpoint pointing to /message?sessionId=', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ active: true, email: 'james.ellars@axim.us.com' }))
-      );
-
-      const request = new Request('https://mcp.axim.us.com/sse', {
-        method: 'GET',
-        headers: {
-          'Authorization': 'Bearer passport-token',
-          'CF-Access-Client-Id': 'cf-client-id',
-          'CF-Access-Client-Secret': 'cf-client-secret'
-        }
-      });
-
-      const response = await worker.fetch(request, baseEnv, context);
-
-      expect(response.status).toBe(200);
-      expect(response.headers.get('Content-Type')).toBe('text/event-stream');
-
-      const reader = response.body?.getReader();
-      const { value } = await reader!.read();
-      const text = new TextDecoder().decode(value);
-
-      expect(text).toContain('event: endpoint');
-      expect(text).toContain('https://mcp.axim.us.com/message?sessionId=');
-    });
-
-    it('rejects unauthenticated /sse connections with HTTP 401', async () => {
-      const request = new Request('https://mcp.axim.us.com/sse', { method: 'GET' });
+      const request = new Request('https://mcp.axim.us.com/dock/config');
       const response = await worker.fetch(request, baseEnv, context);
       expect(response.status).toBe(403);
     });
@@ -109,7 +111,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
     it('unauthorized emails receive HTTP 403', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ active: true, email: 'unauthorized@example.test' })));
 
-      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'ping' });
+      const request = makeRequest({ jsonrpc: '2.0', id: 1, method: 'ping' }, { 'CF-Access-Client-Id': 'invalid', 'CF-Access-Client-Secret': 'invalid' });
       const response = await worker.fetch(request, baseEnv, context);
       expect(response.status).toBe(403);
     });

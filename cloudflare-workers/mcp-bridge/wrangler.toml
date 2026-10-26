@@ -20,3 +20,7 @@ id = "f859e905dad84e17b9556b749fcd1379"
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+routes = [
+  { pattern = "mcp.axim.us.com/*", zone_name = "axim.us.com" }
+]
