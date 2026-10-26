@@ -4,6 +4,10 @@ compatibility_date = "2026-09-13"
 compatibility_flags = ["nodejs_compat"]
 preview_urls = false
 
+routes = [
+  { pattern = "mcp.axim.us.com/*", zone_name = "axim.us.com" }
+]
+
 [vars]
 ENVIRONMENT = "production"
 PASSPORT_VERIFY_URL = "https://passport.axim.us.com/api/v1/auth/verify-token"
@@ -21,6 +25,3 @@ id = "f859e905dad84e17b9556b749fcd1379"
 enabled = true
 head_sampling_rate = 1
 
-routes = [
-  { pattern = "mcp.axim.us.com/*", zone_name = "axim.us.com" }
-]

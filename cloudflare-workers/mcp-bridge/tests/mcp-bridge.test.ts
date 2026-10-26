@@ -65,7 +65,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
 
       const response = await worker.fetch(request, baseEnv, context);
       expect(response.status).toBe(200);
-      const json = await response.json();
+      const json = await response.json() as any;
       expect(json.result).toBeDefined();
     });
 
@@ -73,7 +73,7 @@ describe('AXiM Internal MCP Bridge worker', () => {
       const request = new Request('https://mcp.axim.us.com/', { method: 'GET' });
       const response = await worker.fetch(request, baseEnv, context);
       expect(response.status).toBe(200);
-      const json = await response.json();
+      const json = await response.json() as any;
       expect(json.name).toBe('axim-core-mcp');
       expect(json.status).toBe('operational');
     });
